@@ -173,7 +173,7 @@ impl WiFi {
         }
         while unsafe { MAC_CTRL_REG.read_volatile() } & 0x2000 != 0 {}
     }
-    fn change_channel(channel_number: u8) {
+    pub fn change_channel(&self, channel_number: u8) {
         debug!("Changing channel to {channel_number}");
         Self::deinit_mac();
         unsafe {
@@ -229,7 +229,7 @@ impl WiFi {
         temp.phy_enable();
         temp.reset_mac();
         Self::init_mac();
-        Self::change_channel(1);
+        temp.change_channel(1);
         Self::ic_enable();
         Self::chip_enable();
         critical_section::with(|cs| temp.dma_list.borrow_ref_mut(cs).init());
