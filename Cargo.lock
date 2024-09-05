@@ -467,15 +467,6 @@ dependencies = [
 [[package]]
 name = "esp-build"
 version = "0.1.0"
-dependencies = [
- "quote",
- "syn 2.0.77",
- "termcolor",
-]
-
-[[package]]
-name = "esp-build"
-version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b94a4b8d74e7cc7baabcca5b2277b41877e039ad9cd49959d48ef94dac7eab4b"
 dependencies = [
@@ -485,8 +476,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp-build"
+version = "0.1.0"
+source = "git+https://github.com/esp-rs/esp-hal#4d9ea52eaef229fbe7df3c09a339cb8671e55d98"
+dependencies = [
+ "quote",
+ "syn 2.0.77",
+ "termcolor",
+]
+
+[[package]]
 name = "esp-hal"
 version = "0.20.1"
+source = "git+https://github.com/esp-rs/esp-hal#4d9ea52eaef229fbe7df3c09a339cb8671e55d98"
 dependencies = [
  "basic-toml",
  "bitfield",
@@ -506,7 +508,7 @@ dependencies = [
  "embedded-io",
  "embedded-io-async",
  "enumset",
- "esp-build 0.1.0",
+ "esp-build 0.1.0 (git+https://github.com/esp-rs/esp-hal)",
  "esp-hal-procmacros",
  "esp-metadata",
  "esp-riscv-rt",
@@ -528,13 +530,14 @@ dependencies = [
 [[package]]
 name = "esp-hal-embassy"
 version = "0.3.0"
+source = "git+https://github.com/esp-rs/esp-hal#4d9ea52eaef229fbe7df3c09a339cb8671e55d98"
 dependencies = [
  "cfg-if",
  "critical-section",
  "document-features",
  "embassy-executor",
  "embassy-time-driver",
- "esp-build 0.1.0",
+ "esp-build 0.1.0 (git+https://github.com/esp-rs/esp-hal)",
  "esp-hal",
  "esp-hal-procmacros",
  "esp-metadata",
@@ -545,12 +548,13 @@ dependencies = [
 [[package]]
 name = "esp-hal-procmacros"
 version = "0.13.0"
+source = "git+https://github.com/esp-rs/esp-hal#4d9ea52eaef229fbe7df3c09a339cb8671e55d98"
 dependencies = [
  "darling",
  "document-features",
  "litrs",
  "proc-macro-crate",
- "proc-macro-error",
+ "proc-macro-error2",
  "proc-macro2",
  "quote",
  "syn 2.0.77",
@@ -559,6 +563,7 @@ dependencies = [
 [[package]]
 name = "esp-metadata"
 version = "0.3.0"
+source = "git+https://github.com/esp-rs/esp-hal#4d9ea52eaef229fbe7df3c09a339cb8671e55d98"
 dependencies = [
  "anyhow",
  "basic-toml",
@@ -581,6 +586,7 @@ dependencies = [
 [[package]]
 name = "esp-riscv-rt"
 version = "0.9.0"
+source = "git+https://github.com/esp-rs/esp-hal#4d9ea52eaef229fbe7df3c09a339cb8671e55d98"
 dependencies = [
  "document-features",
  "riscv",
@@ -590,13 +596,14 @@ dependencies = [
 [[package]]
 name = "esp-wifi"
 version = "0.9.1"
+source = "git+https://github.com/esp-rs/esp-hal#4d9ea52eaef229fbe7df3c09a339cb8671e55d98"
 dependencies = [
  "atomic-waker",
  "cfg-if",
  "critical-section",
  "embedded-io",
  "enumset",
- "esp-build 0.1.0",
+ "esp-build 0.1.0 (git+https://github.com/esp-rs/esp-hal)",
  "esp-hal",
  "esp-hal-embassy",
  "esp-metadata",
@@ -799,7 +806,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "ieee80211"
 version = "0.5.0"
-source = "git+https://github.com/Frostie314159/ieee80211-rs#2999cb3b391016bf496fdd487e2678e8a8efac6f"
+source = "git+https://github.com/Frostie314159/ieee80211-rs#e5f5cfb86961a7c4ac757c7fd63abda925b4bdd0"
 dependencies = [
  "bitfield-struct",
  "const_soft_float",
@@ -1109,6 +1116,28 @@ dependencies = [
  "proc-macro2",
  "quote",
  "version_check",
+]
+
+[[package]]
+name = "proc-macro-error-attr2"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
+name = "proc-macro-error2"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74cdd32837fa2e86ec09c8266e5aad92400ac934c6dbca83d54673b298db3e45"
+dependencies = [
+ "proc-macro-error-attr2",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.77",
 ]
 
 [[package]]
@@ -1577,6 +1606,7 @@ dependencies = [
 [[package]]
 name = "xtensa-lx-rt"
 version = "0.17.1"
+source = "git+https://github.com/esp-rs/esp-hal#4d9ea52eaef229fbe7df3c09a339cb8671e55d98"
 dependencies = [
  "anyhow",
  "bare-metal",
@@ -1594,6 +1624,7 @@ dependencies = [
 [[package]]
 name = "xtensa-lx-rt-proc-macros"
 version = "0.2.2"
+source = "git+https://github.com/esp-rs/esp-hal#4d9ea52eaef229fbe7df3c09a339cb8671e55d98"
 dependencies = [
  "darling",
  "proc-macro2",
