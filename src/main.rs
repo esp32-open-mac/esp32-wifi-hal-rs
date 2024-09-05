@@ -10,7 +10,7 @@ use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 use esp_wifi_sys::include::wifi_pkt_rx_ctrl_t;
 use ieee80211::{match_frames, mgmt_frame::BeaconFrame};
-use log::{info, LevelFilter};
+use log::info;
 use wmac::WiFi;
 
 extern crate alloc;
@@ -46,14 +46,14 @@ fn init_heap() {
 async fn main(_spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     init_heap();
-    esp_println::logger::init_logger(LevelFilter::Debug);
+    esp_println::logger::init_logger_from_env();
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
 
     let wifi = WiFi::new(peripherals.WIFI, peripherals.RADIO_CLK, peripherals.ADC2);
     let mut known_ssids = BTreeSet::new();
-    let mut hop_set = repeat([1, 6, 13]).flatten();
+    let mut hop_set = repeat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]).flatten();
     let mut hop_interval = Ticker::every(Duration::from_secs(1));
     loop {
         match select(wifi.receive(), hop_interval.next()).await {
