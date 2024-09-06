@@ -1,4 +1,5 @@
 use core::{
+    marker::PhantomPinned,
     ptr::{null_mut, NonNull},
     slice,
 };
@@ -27,6 +28,7 @@ pub struct DMAListItem {
     dma_list_header: DMAListHeader,
     buffer: NonNull<()>,
     next: *mut DMAListItem,
+    _phantom: PhantomPinned,
 }
 impl DMAListItem {
     /// Returns a byte slice of the buffer, which is [DMAListHeader::buffer_length] long.
@@ -41,7 +43,7 @@ impl DMAListItem {
     pub fn next(&mut self) -> Option<NonNull<DMAListItem>> {
         NonNull::new(self.next)
     }
-    pub fn new(buffer: &mut [u8], next: Option<NonNull<DMAListItem>>) -> Self {
+    pub fn new(buffer: &[u8], next: Option<NonNull<DMAListItem>>) -> Self {
         let next = match next {
             Some(next) => next.as_ptr(),
             None => null_mut(),
@@ -52,8 +54,9 @@ impl DMAListItem {
                 .with_buffer_length(buffer.len() as u16)
                 .with_has_data(false)
                 .with_dma_owned(true),
-            buffer: NonNull::new(buffer as *mut _ as _).unwrap(),
+            buffer: NonNull::new(buffer as *const _ as *mut u8 as _).unwrap(),
             next,
+            _phantom: PhantomPinned,
         }
     }
     pub fn set_next(&mut self, next: Option<&mut DMAListItem>) {
@@ -61,6 +64,12 @@ impl DMAListItem {
             Some(next) => next,
             None => null_mut(),
         };
+    }
+    pub fn set_size(&mut self, size: usize) {
+        self.dma_list_header.set_buffer_size(size as u16);
+    }
+    pub fn set_has_data(&mut self, has_data: bool) {
+        self.dma_list_header.set_has_data(has_data);
     }
 }
 pub struct DMAList {

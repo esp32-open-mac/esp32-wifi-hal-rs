@@ -51,4 +51,5 @@ extern "C" {
     pub fn enable_wifi_agc();
     pub fn hal_init();
     pub fn wifi_set_rx_policy(policy: u8);
+    pub fn tx_pwctrl_background(_: u8, _: u8);
 }

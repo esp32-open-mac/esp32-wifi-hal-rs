@@ -1,34 +1,20 @@
 #![no_std]
 #![no_main]
+
+extern crate alloc;
+
 use core::{iter::repeat, mem::MaybeUninit};
 
 use alloc::{collections::btree_set::BTreeSet, string::ToString};
 use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Ticker};
+use esp32_open_mac_rs::WiFi;
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 use esp_wifi_sys::include::wifi_pkt_rx_ctrl_t;
 use ieee80211::{match_frames, mgmt_frame::BeaconFrame};
 use log::info;
-use wmac::WiFi;
-
-extern crate alloc;
-
-mod dma_list;
-mod ffi;
-mod phy_init_data;
-mod regs;
-mod wmac;
-
-/* macro_rules! mk_static {
-    ($t:ty,$val:expr) => {{
-        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit().write(($val));
-        x
-    }};
-} */
 
 #[global_allocator]
 static ALLOCATOR: esp_alloc::EspHeap = esp_alloc::EspHeap::empty();
