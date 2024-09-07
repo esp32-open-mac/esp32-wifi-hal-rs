@@ -666,6 +666,7 @@ dependencies = [
  "heapless 0.8.0",
  "ieee80211",
  "log",
+ "macro-bits",
  "smoltcp",
  "static_cell",
 ]

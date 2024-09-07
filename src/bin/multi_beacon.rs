@@ -1,5 +1,5 @@
 //! This example demonstrates, that concurrent tranmissions are possible.
-//! 
+//!
 //! NOTE: There is a bug currently, regarding the slot selection, causing beacons to only appear sporadically.
 
 #![no_main]
@@ -8,7 +8,7 @@ use core::{marker::PhantomData, mem::MaybeUninit};
 
 use embassy_executor::Spawner;
 use embassy_time::{Instant, Timer};
-use esp32_open_mac_rs::WiFi;
+use esp32_open_mac_rs::{WiFi, WiFiRate};
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal_embassy::main;
@@ -100,7 +100,8 @@ async fn beacon_task(ssid: &'static str, id: u8, wifi: &'static WiFi) {
             },
         };
         let written = buffer.pwrite(frame, 0).unwrap();
-        wifi.transmit(&buffer[..written]).await;
+        wifi.transmit(&buffer[..written], WiFiRate::PhyRate54M)
+            .await;
         Timer::after_millis(100).await;
         seq_num += 1;
     }

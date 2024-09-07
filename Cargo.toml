@@ -50,6 +50,7 @@ esp-backtrace = { version = "0.14.0", features = [
 esp-println = { version = "0.11.0", features = ["log"] }
 ieee80211 = { git = "https://github.com/Frostie314159/ieee80211-rs" }
 embassy-executor = { version = "0.6.0", features = ["task-arena-size-32768"] }
+macro-bits = "0.1.5"
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization

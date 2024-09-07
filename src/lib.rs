@@ -7,4 +7,4 @@ mod wmac;
 
 extern crate alloc;
 
-pub use wmac::{BorrowedBuffer, WiFi};
+pub use wmac::{BorrowedBuffer, WiFi, WiFiRate};

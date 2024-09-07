@@ -4,7 +4,7 @@ use core::{marker::PhantomData, mem::MaybeUninit};
 
 use embassy_executor::Spawner;
 use embassy_time::{Instant, Timer};
-use esp32_open_mac_rs::WiFi;
+use esp32_open_mac_rs::{WiFi, WiFiRate};
 use esp_backtrace as _;
 use esp_hal::{efuse::Efuse, timer::timg::TimerGroup};
 use esp_hal_embassy::main;
@@ -86,7 +86,7 @@ async fn main(_spawner: Spawner) {
             },
         };
         let written = buffer.pwrite(frame, 0).unwrap();
-        wifi.transmit(&buffer[..written]).await;
+        wifi.transmit(&buffer[..written], WiFiRate::PhyRate6M).await;
         Timer::after_millis(100).await;
         seq_num += 1;
     }

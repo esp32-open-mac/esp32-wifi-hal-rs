@@ -20,6 +20,7 @@ use esp_hal::{
 use esp_wifi_sys::include::{
     esp_phy_calibration_data_t, esp_phy_calibration_mode_t_PHY_RF_CAL_FULL, register_chipv7_phy,
 };
+use macro_bits::serializable_enum;
 
 use crate::{
     dma_list::{DMAList, DMAListItem},
@@ -35,6 +36,26 @@ use crate::{
     },
 };
 use log::{debug, error, trace, warn};
+
+serializable_enum! {
+    pub enum WiFiRate: u8 {
+        PhyRate1ML => 0x00,
+        PhyRate2ML => 0x01,
+        PhyRate5ML => 0x02,
+        PhyRate11ML => 0x03,
+        PhyRate2MS => 0x05,
+        PhyRate5MS => 0x06,
+        PhyRate11MS => 0x07,
+        PhyRate48M => 0x08,
+        PhyRate24M => 0x09,
+        PhyRate12M => 0x0a,
+        PhyRate6M => 0x0b,
+        PhyRate54M => 0x0c,
+        PhyRate36M => 0x0d,
+        PhyRate18M => 0x0e,
+        PhyRate9M => 0x0f
+    }
+}
 
 pub struct SignalQueue {
     waker: AtomicWaker,
@@ -142,7 +163,7 @@ fn set_txq_invalid(slot: usize) {
         plcp0_ptr.write_volatile(plcp0_ptr.read_volatile() & 0xb0000000);
     }
 }
-async fn transmit_internal(dma_list_item: Pin<&DMAListItem>, slot: usize) -> bool {
+async fn transmit_internal(dma_list_item: Pin<&DMAListItem>, rate: WiFiRate, slot: usize) -> bool {
     let tx_config_ptr = tx_config(slot);
     let plcp0_ptr = plcp0(slot);
     let plcp1_ptr = plcp1(slot);
@@ -151,7 +172,11 @@ async fn transmit_internal(dma_list_item: Pin<&DMAListItem>, slot: usize) -> boo
     unsafe {
         tx_config_ptr.write_volatile(tx_config_ptr.read_volatile() | 0xa);
         plcp0_ptr.write_volatile(dma_list_item.get_ref() as *const _ as u32 & 0xfffff | 0x00600000);
-        plcp1_ptr.write_volatile(0x10000000 | dma_list_item.buffer().len() as u32 & 0xfff);
+        plcp1_ptr.write_volatile(
+            0x10000000
+                | dma_list_item.buffer().len() as u32 & 0xfff
+                | ((rate.into_bits() as u32 & 0x1f) << 12),
+        );
         plcp2_ptr.write_volatile(0x00000020);
         duration_ptr.write_volatile(0);
         tx_config_ptr.write_volatile(tx_config_ptr.read_volatile() | 0x02000000);
@@ -355,7 +380,7 @@ impl WiFi {
         // Initialize DMA list.
         critical_section::with(|cs| temp.dma_list.borrow_ref_mut(cs).init());
         // Initialize TX slot queue
-        (0..5).for_each(|slot| WIFI_TX_SLOT_QUEUE.try_send(slot).unwrap());
+        (0..1).for_each(|slot| WIFI_TX_SLOT_QUEUE.try_send(slot).unwrap());
         temp
     }
     pub async fn receive(&self) -> BorrowedBuffer<'_, '_> {
@@ -379,7 +404,7 @@ impl WiFi {
             dma_list_item,
         }
     }
-    pub async fn transmit(&self, buffer: &[u8]) -> bool {
+    pub async fn transmit(&self, buffer: &[u8], rate: WiFiRate) -> bool {
         let slot = WIFI_TX_SLOT_QUEUE.receive().await;
         debug!("Acquired slot {slot}.");
 
@@ -391,7 +416,7 @@ impl WiFi {
         // And then pin it, before passing it to hardware.
         let dma_list_item = pin!(dma_list_item);
 
-        let tx_success = transmit_internal(dma_list_item.into_ref(), slot).await;
+        let tx_success = transmit_internal(dma_list_item.into_ref(), rate, slot).await;
 
         // Put the slot back into the availability queue.
         WIFI_TX_SLOT_QUEUE.send(slot).await;
