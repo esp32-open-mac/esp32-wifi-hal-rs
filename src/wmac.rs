@@ -19,6 +19,7 @@ use esp_hal::{
 };
 use esp_wifi_sys::include::{
     esp_phy_calibration_data_t, esp_phy_calibration_mode_t_PHY_RF_CAL_FULL, register_chipv7_phy,
+    wifi_pkt_rx_ctrl_t,
 };
 use macro_bits::serializable_enum;
 
@@ -38,6 +39,7 @@ use crate::{
 use log::{debug, error, trace, warn};
 
 serializable_enum! {
+    /// The rate used by the PHY.
     pub enum WiFiRate: u8 {
         PhyRate1ML => 0x00,
         PhyRate2ML => 0x01,
@@ -218,9 +220,16 @@ pub enum TxTimeoutBehaviour {
     Drop,
 } */
 
+/// A buffer borrowed from the DMA list.
 pub struct BorrowedBuffer<'a: 'b, 'b> {
     dma_list: &'a Mutex<RefCell<DMAList>>,
     dma_list_item: &'b mut DMAListItem,
+}
+impl BorrowedBuffer<'_, '_> {
+    /// Returns the actual MPDU from the buffer excluding the prepended [wifi_pkt_rx_ctrl_t].
+    pub fn mpdu_buffer(&self) -> &[u8] {
+        &self[size_of::<wifi_pkt_rx_ctrl_t>()..]
+    }
 }
 impl Deref for BorrowedBuffer<'_, '_> {
     type Target = [u8];
@@ -362,6 +371,7 @@ impl WiFi {
         }
         Self::ic_enable_rx();
     }
+    /// Initialize the WiFi peripheral.
     pub fn new(_wifi: WIFI, radio_clock: RADIO_CLK, _adc2: ADC2) -> Self {
         debug!("Initializing WiFi.");
         let mut temp = Self {
@@ -383,6 +393,7 @@ impl WiFi {
         (0..1).for_each(|slot| WIFI_TX_SLOT_QUEUE.try_send(slot).unwrap());
         temp
     }
+    /// Receive a frame.
     pub async fn receive(&self) -> BorrowedBuffer<'_, '_> {
         let dma_list_item;
 
