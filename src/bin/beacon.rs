@@ -33,6 +33,8 @@ fn init_heap() {
     }
 }
 
+const SSID: &str = "The cake is a lie";
+
 #[main]
 async fn main(_spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -61,7 +63,7 @@ async fn main(_spawner: Spawner) {
                 timestamp: start_timestamp.elapsed().as_micros(),
                 capabilities_info: CapabilitiesInformation::new().with_is_ess(true),
                 elements: element_chain! {
-                    ssid!("ESP32-Open-MAC"),
+                    ssid!(SSID),
                     supported_rates![
                             1 B,
                             2 B,

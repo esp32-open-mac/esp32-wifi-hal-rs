@@ -1,4 +1,4 @@
-use crate::dma_list::DMAListItem;
+use crate::dma_list::RxDMAListItem;
 
 pub const MAC_CTRL_REG: *mut u32 = 0x3ff73cb8 as _;
 pub const MAC_RX_CTRL_REG: *mut u32 = 0x3ff73084 as _;
@@ -6,9 +6,18 @@ pub const MAC_RX_CTRL_REG: *mut u32 = 0x3ff73084 as _;
 pub const MAC_DMA_INT_STATUS: *mut u32 = 0x3ff73c48 as _;
 pub const MAC_DMA_INT_CLEAR: *mut u32 = 0x3ff73c4c as _;
 
-pub const MAC_BASE_RX_DESCR: *mut *mut DMAListItem = 0x3ff73088 as _;
-pub const MAC_NEXT_RX_DESCR: *mut *mut DMAListItem = 0x3ff7308c as _;
-pub const MAC_LAST_RX_DESCR: *mut *mut DMAListItem = 0x3ff73090 as _;
+pub const MAC_BASE_RX_DESCR: *mut *mut RxDMAListItem = 0x3ff73088 as _;
+pub const MAC_NEXT_RX_DESCR: *mut *mut RxDMAListItem = 0x3ff7308c as _;
+pub const MAC_LAST_RX_DESCR: *mut *mut RxDMAListItem = 0x3ff73090 as _;
+pub fn base_rx_descr_ptr() -> *mut RxDMAListItem {
+    unsafe { MAC_BASE_RX_DESCR.read_volatile() }
+}
+pub fn next_rx_descr_ptr() -> *mut RxDMAListItem {
+    unsafe { MAC_NEXT_RX_DESCR.read_volatile() }
+}
+pub fn last_rx_descr_ptr() -> *mut RxDMAListItem {
+    unsafe { MAC_LAST_RX_DESCR.read_volatile() }
+}
 
 const MAC_TX_CONFIG_BASE: *mut u32 = 0x3ff73d1c as _;
 const MAC_TX_CONFIG_OFFSET: usize = 2;

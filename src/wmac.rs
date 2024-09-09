@@ -24,7 +24,7 @@ use esp_wifi_sys::include::{
 use macro_bits::serializable_enum;
 
 use crate::{
-    dma_list::{DMAList, DMAListItem},
+    dma_list::{DMAList, DMAListItem, RxDMAListItem, TxDMAListItem},
     ffi::{
         chip_v7_set_chan_nomac, disable_wifi_agc, enable_wifi_agc, hal_init, tx_pwctrl_background,
         wifi_set_rx_policy,
@@ -56,6 +56,11 @@ serializable_enum! {
         PhyRate36M => 0x0d,
         PhyRate18M => 0x0e,
         PhyRate9M => 0x0f
+    }
+}
+serializable_enum! {
+    pub enum RxPolicy: u8 {
+        BeaconsOnly => 0x03
     }
 }
 
@@ -165,7 +170,11 @@ fn set_txq_invalid(slot: usize) {
         plcp0_ptr.write_volatile(plcp0_ptr.read_volatile() & 0xb0000000);
     }
 }
-async fn transmit_internal(dma_list_item: Pin<&DMAListItem>, rate: WiFiRate, slot: usize) -> bool {
+async fn transmit_internal(
+    dma_list_item: Pin<&TxDMAListItem>,
+    rate: WiFiRate,
+    slot: usize,
+) -> bool {
     let tx_config_ptr = tx_config(slot);
     let plcp0_ptr = plcp0(slot);
     let plcp1_ptr = plcp1(slot);
@@ -223,7 +232,7 @@ pub enum TxTimeoutBehaviour {
 /// A buffer borrowed from the DMA list.
 pub struct BorrowedBuffer<'a: 'b, 'b> {
     dma_list: &'a Mutex<RefCell<DMAList>>,
-    dma_list_item: &'b mut DMAListItem,
+    dma_list_item: &'b mut RxDMAListItem,
 }
 impl BorrowedBuffer<'_, '_> {
     /// Returns the actual MPDU from the buffer excluding the prepended [wifi_pkt_rx_ctrl_t].
@@ -420,9 +429,7 @@ impl WiFi {
         debug!("Acquired slot {slot}.");
 
         // We initialize the DMA list item.
-        let mut dma_list_item = DMAListItem::new(buffer, None);
-        dma_list_item.set_size(buffer.len() + 32);
-        dma_list_item.set_has_data(true);
+        let mut dma_list_item = DMAListItem::new_for_tx(buffer);
 
         // And then pin it, before passing it to hardware.
         let dma_list_item = pin!(dma_list_item);
