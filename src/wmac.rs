@@ -253,7 +253,6 @@ impl Drop for BorrowedBuffer<'_, '_> {
 }
 pub struct WiFi {
     radio_clock: RADIO_CLK,
-    _adc2: ADC2,
     dma_list: Mutex<RefCell<DMAList>>,
 }
 impl WiFi {
@@ -385,7 +384,6 @@ impl WiFi {
         debug!("Initializing WiFi.");
         let mut temp = Self {
             radio_clock,
-            _adc2,
             dma_list: Mutex::new(RefCell::new(DMAList::allocate(10))),
         };
         Self::enable_wifi_power_domain();
