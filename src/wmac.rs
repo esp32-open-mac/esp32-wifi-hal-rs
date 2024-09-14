@@ -110,6 +110,10 @@ static WIFI_TX_SLOT_QUEUE: Channel<CriticalSectionRawMutex, usize, 5> = Channel:
 static FRAMES_SINCE_LAST_TXPWR_CTRL: AtomicU8 = AtomicU8::new(0);
 
 fn process_tx_complete(slot: usize) {
+    if FRAMES_SINCE_LAST_TXPWR_CTRL.fetch_add(1, Ordering::Relaxed) == 4 {
+        unsafe { tx_pwctrl_background(1, 0) };
+        FRAMES_SINCE_LAST_TXPWR_CTRL.store(0, Ordering::Relaxed);
+    }
     unsafe { MAC_TXQ_COMPLETE_CLEAR.write_volatile(1 << slot) };
     if slot < 5 {
         WIFI_TX_SLOTS[slot].1.store(TX_DONE, Ordering::Relaxed);
@@ -118,10 +122,6 @@ fn process_tx_complete(slot: usize) {
 }
 fn process_tx_timeout(slot: usize) {
     unsafe { MAC_TXQ_ERROR_CLEAR.write_volatile(1 << slot) };
-    if FRAMES_SINCE_LAST_TXPWR_CTRL.fetch_add(1, Ordering::Relaxed) == 4 {
-        unsafe { tx_pwctrl_background(1, 0) };
-        FRAMES_SINCE_LAST_TXPWR_CTRL.store(0, Ordering::Relaxed);
-    }
     if slot < 5 {
         set_txq_invalid(slot);
         WIFI_TX_SLOTS[slot].1.store(TX_TIMEOUT, Ordering::Relaxed);
