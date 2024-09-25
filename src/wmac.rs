@@ -21,6 +21,7 @@ use esp_wifi_sys::include::{
     esp_phy_calibration_data_t, esp_phy_calibration_mode_t_PHY_RF_CAL_FULL, register_chipv7_phy,
     wifi_pkt_rx_ctrl_t,
 };
+use ieee80211::common::HtSig;
 use macro_bits::serializable_enum;
 
 use crate::{
@@ -31,14 +32,15 @@ use crate::{
     },
     phy_init_data::PHY_INIT_DATA_DEFAULT,
     regs::{
-        duration, plcp0, plcp1, plcp2, tx_config, MAC_CTRL_REG, MAC_DMA_INT_CLEAR,
-        MAC_DMA_INT_STATUS, MAC_RX_CTRL_REG, MAC_TXQ_COMPLETE_CLEAR, MAC_TXQ_COMPLETE_STATUS,
-        MAC_TXQ_ERROR_CLEAR, MAC_TXQ_ERROR_STATUS,
+        duration, ht_sig, ht_unknown, plcp0, plcp1, plcp2, tx_config, MAC_CTRL_REG,
+        MAC_DMA_INT_CLEAR, MAC_DMA_INT_STATUS, MAC_RX_CTRL_REG, MAC_TXQ_COMPLETE_CLEAR,
+        MAC_TXQ_COMPLETE_STATUS, MAC_TXQ_ERROR_CLEAR, MAC_TXQ_ERROR_STATUS,
     },
 };
-use log::{debug, error, trace, warn};
+use log::{debug, error, warn};
 
 serializable_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     /// The rate used by the PHY.
     pub enum WiFiRate: u8 {
         PhyRate1ML => 0x00,
@@ -55,7 +57,31 @@ serializable_enum! {
         PhyRate54M => 0x0c,
         PhyRate36M => 0x0d,
         PhyRate18M => 0x0e,
-        PhyRate9M => 0x0f
+        PhyRate9M => 0x0f,
+        PhyRateMCS0LGI => 0x10,
+        PhyRateMCS1LGI => 0x11,
+        PhyRateMCS2LGI => 0x12,
+        PhyRateMCS3LGI => 0x13,
+        PhyRateMCS4LGI => 0x14,
+        PhyRateMCS5LGI => 0x15,
+        PhyRateMCS6LGI => 0x16,
+        PhyRateMCS7LGI => 0x17,
+        PhyRateMCS0SGI => 0x18,
+        PhyRateMCS1SGI => 0x19,
+        PhyRateMCS2SGI => 0x1a,
+        PhyRateMCS3SGI => 0x1b,
+        PhyRateMCS4SGI => 0x1c,
+        PhyRateMCS5SGI => 0x1d,
+        PhyRateMCS6SGI => 0x1e,
+        PhyRateMCS7SGI => 0x1f
+    }
+}
+impl WiFiRate {
+    pub const fn is_ht(&self) -> bool {
+        self.into_bits() >= 0x10
+    }
+    pub const fn is_short_gi(&self) -> bool {
+        self.into_bits() >= 0x18
     }
 }
 serializable_enum! {
@@ -99,14 +125,51 @@ impl SignalQueue {
 const TX_IN_PROGRESS_OR_FREE: u8 = 0;
 const TX_DONE: u8 = 1;
 const TX_TIMEOUT: u8 = 2;
+const TX_COLLISION: u8 = 3;
+
+/// This is used to wait for a slot to become available.
+static WIFI_TX_SLOT_QUEUE: SlotManager = SlotManager::new();
+struct BorrowedSlot {
+    slot: usize,
+}
+impl Deref for BorrowedSlot {
+    type Target = usize;
+    fn deref(&self) -> &Self::Target {
+        &self.slot
+    }
+}
+impl Drop for BorrowedSlot {
+    fn drop(&mut self) {
+        let _ = WIFI_TX_SLOT_QUEUE.slots.try_send(self.slot);
+    }
+}
+struct SlotManager {
+    slots: Channel<CriticalSectionRawMutex, usize, 5>,
+}
+impl SlotManager {
+    pub const fn new() -> Self {
+        Self {
+            slots: Channel::new(),
+        }
+    }
+    pub fn init(&self, slots: impl IntoIterator<Item = usize>) {
+        assert!(self.slots.is_empty());
+        slots.into_iter().for_each(|slot| {
+            let _ = self.slots.try_send(slot);
+        });
+    }
+    pub async fn wait_for_slot(&self) -> BorrowedSlot {
+        BorrowedSlot {
+            slot: self.slots.receive().await,
+        }
+    }
+}
 
 static WIFI_RX_SIGNAL_QUEUE: SignalQueue = SignalQueue::new();
 #[allow(clippy::declare_interior_mutable_const)]
 const SLOT: (AtomicWaker, AtomicU8) = (AtomicWaker::new(), AtomicU8::new(TX_IN_PROGRESS_OR_FREE));
 /// These are for knowing, when transmission has finished.
 static WIFI_TX_SLOTS: [(AtomicWaker, AtomicU8); 5] = [SLOT; 5];
-/// This is used to wait for a slot to become available.
-static WIFI_TX_SLOT_QUEUE: Channel<CriticalSectionRawMutex, usize, 5> = Channel::new();
 static FRAMES_SINCE_LAST_TXPWR_CTRL: AtomicU8 = AtomicU8::new(0);
 
 fn process_tx_complete(slot: usize) {
@@ -121,10 +184,18 @@ fn process_tx_complete(slot: usize) {
     }
 }
 fn process_tx_timeout(slot: usize) {
-    unsafe { MAC_TXQ_ERROR_CLEAR.write_volatile(1 << slot) };
+    unsafe { MAC_TXQ_ERROR_CLEAR.write_volatile(1 << (slot + 0x10)) };
     if slot < 5 {
         set_txq_invalid(slot);
         WIFI_TX_SLOTS[slot].1.store(TX_TIMEOUT, Ordering::Relaxed);
+        WIFI_TX_SLOTS[slot].0.wake();
+    }
+}
+fn process_collision(slot: usize) {
+    unsafe { MAC_TXQ_ERROR_CLEAR.write_volatile((slot + 0x10) as u32) };
+    if slot < 5 {
+        set_txq_invalid(slot);
+        WIFI_TX_SLOTS[slot].1.store(TX_COLLISION, Ordering::Relaxed);
         WIFI_TX_SLOTS[slot].0.wake();
     }
 }
@@ -147,15 +218,23 @@ extern "C" fn interrupt_handler() {
             txq_complete_status &= !(1 << slot);
         }
     } else if cause & 0x80000 != 0 {
-        let mut txq_error_status = unsafe { MAC_TXQ_ERROR_STATUS.read_volatile() };
+        // Timeout
+        let mut txq_error_status = unsafe { MAC_TXQ_ERROR_STATUS.read_volatile() } >> 0x10 & 0x7ff;
         while txq_error_status != 0 {
             let slot = 31 - txq_error_status.leading_zeros();
             process_tx_timeout(slot as usize);
             // We mask away, the bit for our slot.
             txq_error_status &= !(1 << slot);
         }
-    } else {
-        trace!("Got unknown interrupt: {cause:x}.");
+    } else if cause & 0x100 != 0 {
+        // Timeout
+        let mut txq_error_status = unsafe { MAC_TXQ_ERROR_STATUS.read_volatile() } & 0x7ff;
+        while txq_error_status != 0 {
+            let slot = 31 - txq_error_status.leading_zeros();
+            process_collision(slot as usize);
+            // We mask away, the bit for our slot.
+            txq_error_status &= !(1 << slot);
+        }
     }
 }
 fn enable_tx(slot: usize) {
@@ -180,18 +259,32 @@ async fn transmit_internal(
     let plcp1_ptr = plcp1(slot);
     let plcp2_ptr = plcp2(slot);
     let duration_ptr = duration(slot);
+    let length = dma_list_item.buffer().len();
     unsafe {
         tx_config_ptr.write_volatile(tx_config_ptr.read_volatile() | 0xa);
         plcp0_ptr.write_volatile(dma_list_item.get_ref() as *const _ as u32 & 0xfffff | 0x00600000);
         plcp1_ptr.write_volatile(
             0x10000000
-                | dma_list_item.buffer().len() as u32 & 0xfff
-                | ((rate.into_bits() as u32 & 0x1f) << 12),
+                | length as u32 & 0xfff
+                | ((rate.into_bits() as u32 & 0x1f) << 12)
+                | ((rate.is_ht() as u32) << 25),
         );
         plcp2_ptr.write_volatile(0x00000020);
         duration_ptr.write_volatile(0);
-        tx_config_ptr.write_volatile(tx_config_ptr.read_volatile() | 0x02000000);
-        tx_config_ptr.write_volatile(tx_config_ptr.read_volatile() | 0x00003000);
+        if rate.is_ht() {
+            ht_sig(slot).write_volatile(
+                HtSig::new()
+                    .with_ht_length(length as u16)
+                    .with_mcs(rate.into_bits() & 0b111)
+                    .with_smoothing_recommended(true)
+                    .with_not_sounding(true)
+                    .with_short_gi(rate.is_short_gi())
+                    .into_bits(),
+            );
+            ht_unknown(slot).write_volatile(length as u32 & 0xffff | 0x50000);
+        }
+        // tx_config_ptr.write_volatile(tx_config_ptr.read_volatile() | 0x02000000);
+        // tx_config_ptr.write_volatile(tx_config_ptr.read_volatile() | 0x00003000);
     }
     enable_tx(slot);
 
@@ -207,6 +300,10 @@ async fn transmit_internal(
             WIFI_TX_SLOTS[slot]
                 .1
                 .store(TX_IN_PROGRESS_OR_FREE, Ordering::Relaxed);
+            Poll::Ready(false)
+        }
+        TX_COLLISION => {
+            WIFI_TX_SLOTS[slot].1.store(TX_COLLISION, Ordering::Relaxed);
             Poll::Ready(false)
         }
         TX_IN_PROGRESS_OR_FREE => {
@@ -372,12 +469,15 @@ impl WiFi {
             MAC_RX_CTRL_REG.write_volatile(MAC_RX_CTRL_REG.read_volatile() | 0x80000000);
         }
     }
-    fn chip_enable() {
+    fn chip_enable(&mut self) {
         debug!("chip_enable");
-        unsafe {
-            wifi_set_rx_policy(3);
-        }
+        self.set_rx_policy(3);
         Self::ic_enable_rx();
+    }
+    fn set_rx_policy(&mut self, rx_policy: u8) {
+        unsafe {
+            wifi_set_rx_policy(rx_policy);
+        }
     }
     /// Initialize the WiFi peripheral.
     pub fn new(_wifi: WIFI, radio_clock: RADIO_CLK, _adc2: ADC2) -> Self {
@@ -393,11 +493,10 @@ impl WiFi {
         Self::init_mac();
         temp.change_channel(1);
         Self::ic_enable();
-        Self::chip_enable();
+        temp.chip_enable();
         // Initialize DMA list.
         critical_section::with(|cs| temp.dma_list.borrow_ref_mut(cs).init());
-        // Initialize TX slot queue
-        (0..1).for_each(|slot| WIFI_TX_SLOT_QUEUE.try_send(slot).unwrap());
+        WIFI_TX_SLOT_QUEUE.init(0..5);
         temp
     }
     /// Receive a frame.
@@ -411,6 +510,7 @@ impl WiFi {
             if let Some(current) =
                 critical_section::with(|cs| self.dma_list.borrow_ref_mut(cs).take_first())
             {
+                debug!("Received packet. len: {}", current.buffer().len());
                 dma_list_item = current;
                 break;
             }
@@ -422,9 +522,10 @@ impl WiFi {
             dma_list_item,
         }
     }
+    /// Transmit a frame.
     pub async fn transmit(&self, buffer: &[u8], rate: WiFiRate) -> bool {
-        let slot = WIFI_TX_SLOT_QUEUE.receive().await;
-        debug!("Acquired slot {slot}.");
+        let slot = WIFI_TX_SLOT_QUEUE.wait_for_slot().await;
+        debug!("Acquired slot {}.", *slot);
 
         // We initialize the DMA list item.
         let mut dma_list_item = DMAListItem::new_for_tx(buffer);
@@ -432,14 +533,11 @@ impl WiFi {
         // And then pin it, before passing it to hardware.
         let dma_list_item = pin!(dma_list_item);
 
-        let tx_success = transmit_internal(dma_list_item.into_ref(), rate, slot).await;
-
-        // Put the slot back into the availability queue.
-        WIFI_TX_SLOT_QUEUE.send(slot).await;
+        let tx_success = transmit_internal(dma_list_item.into_ref(), rate, *slot).await;
         if tx_success {
-            debug!("Finished transmission. Slot {slot} is now free again.");
+            debug!("Finished transmission. Slot {} is now free again.", *slot);
         } else {
-            warn!("Timeout occured for slot {slot}.");
+            warn!("Timeout occured for slot {}.", *slot);
         }
         tx_success
     }

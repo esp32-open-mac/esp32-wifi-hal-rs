@@ -11,7 +11,6 @@ esp-hal = { git = "https://github.com/esp-rs/esp-hal", package = "esp-hal", feat
 ] }
 log = { version = "0.4.21" }
 esp-alloc = "0.4.0"
-embedded-svc = { version = "0.26.1", default-features = false, features = [] }
 embedded-io = "0.6.1"
 esp-wifi = { git = "https://github.com/esp-rs/esp-hal", package = "esp-wifi", features = [
     "esp32",

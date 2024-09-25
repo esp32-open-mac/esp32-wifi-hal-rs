@@ -24,6 +24,7 @@ use ieee80211::{
     scroll::Pwrite,
     supported_rates,
 };
+use log::LevelFilter;
 
 macro_rules! mk_static {
     ($t:ty,$val:expr) => {{
@@ -111,7 +112,7 @@ async fn beacon_task(ssid: &'static str, id: u8, wifi: &'static WiFi) {
 async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     init_heap();
-    esp_println::logger::init_logger_from_env();
+    esp_println::logger::init_logger(LevelFilter::Warn);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);

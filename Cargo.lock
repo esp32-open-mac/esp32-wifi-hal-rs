@@ -391,20 +391,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-svc"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55feac55fb81e14c747d5475f05ead553855a133a36f979fa4e7883a240ee829"
-dependencies = [
- "atomic-waker",
- "embedded-io",
- "enumset",
- "heapless 0.7.17",
- "no-std-net 0.5.0",
- "serde",
-]
-
-[[package]]
 name = "enum-as-inner"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -614,7 +600,7 @@ dependencies = [
  "libm",
  "linked_list_allocator",
  "log",
- "no-std-net 0.6.0",
+ "no-std-net",
  "num-derive",
  "num-traits",
  "portable-atomic",
@@ -655,7 +641,6 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "embedded-io",
- "embedded-svc",
  "esp-alloc",
  "esp-backtrace",
  "esp-hal",
@@ -946,12 +931,6 @@ dependencies = [
  "quote",
  "syn 2.0.77",
 ]
-
-[[package]]
-name = "no-std-net"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bcece43b12349917e096cddfa66107277f123e6c96a5aea78711dc601a47152"
 
 [[package]]
 name = "no-std-net"

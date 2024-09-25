@@ -27,6 +27,10 @@ const MAC_TX_PLCP1_BASE: *mut u32 = 0x3ff74258 as _;
 const MAC_TX_PLCP1_OFFSET: usize = 0xf;
 const MAC_TX_PLCP2_BASE: *mut u32 = 0x3ff7425c as _;
 const MAC_TX_PLCP2_OFFSET: usize = 0xf;
+const MAC_TX_HT_SIG_BASE: *mut u32 = 0x3ff74260 as _;
+const MAC_TX_HT_SIG_OFFSET: usize = 0xf;
+const MAC_TX_HT_UNKNOWN_BASE: *mut u32 = 0x3ff74264 as _;
+const MAC_TX_HT_UNKNOWN_OFFSET: usize = 0xf;
 const MAC_TX_DURATION_BASE: *mut u32 = 0x3ff74268 as _;
 const MAC_TX_DURATION_OFFSET: usize = 0xf;
 
@@ -47,6 +51,12 @@ pub const fn plcp1(slot: usize) -> *mut u32 {
 }
 pub const fn plcp2(slot: usize) -> *mut u32 {
     unsafe { MAC_TX_PLCP2_BASE.sub(MAC_TX_PLCP2_OFFSET * slot) }
+}
+pub const fn ht_sig(slot: usize) -> *mut u32 {
+    unsafe { MAC_TX_HT_SIG_BASE.sub(MAC_TX_HT_SIG_OFFSET * slot) }
+}
+pub const fn ht_unknown(slot: usize) -> *mut u32 {
+    unsafe { MAC_TX_HT_UNKNOWN_BASE.sub(MAC_TX_HT_UNKNOWN_OFFSET * slot) }
 }
 pub const fn duration(slot: usize) -> *mut u32 {
     unsafe { MAC_TX_DURATION_BASE.sub(MAC_TX_DURATION_OFFSET * slot) }
