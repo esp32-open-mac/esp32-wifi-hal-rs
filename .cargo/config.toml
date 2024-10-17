@@ -4,6 +4,7 @@ runner = "espflash flash --monitor"
 
 [env]
 ESP_LOGLEVEL="INFO"
+ESPFLASH_BAUD = "460800"
 
 [build]
 rustflags = [

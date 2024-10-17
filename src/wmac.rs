@@ -10,6 +10,7 @@ use core::{
 use atomic_waker::AtomicWaker;
 use critical_section::Mutex;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use esp32::wifi::TX_SLOT_CONFIG;
 use esp_hal::{
     get_core,
     interrupt::{bind_interrupt, enable, map, CpuInterrupt, Priority},
@@ -31,11 +32,6 @@ use crate::{
         wifi_set_rx_policy,
     },
     phy_init_data::PHY_INIT_DATA_DEFAULT,
-    regs::{
-        duration, ht_sig, ht_unknown, plcp0, plcp1, plcp2, tx_config, MAC_CTRL_REG,
-        MAC_DMA_INT_CLEAR, MAC_DMA_INT_STATUS, MAC_RX_CTRL_REG, MAC_TXQ_COMPLETE_CLEAR,
-        MAC_TXQ_COMPLETE_STATUS, MAC_TXQ_ERROR_CLEAR, MAC_TXQ_ERROR_STATUS,
-    },
 };
 use log::{debug, error, warn};
 
@@ -177,24 +173,33 @@ fn process_tx_complete(slot: usize) {
         unsafe { tx_pwctrl_background(1, 0) };
         FRAMES_SINCE_LAST_TXPWR_CTRL.store(0, Ordering::Relaxed);
     }
-    unsafe { MAC_TXQ_COMPLETE_CLEAR.write_volatile(1 << slot) };
+    unsafe { WIFI::steal() }
+        .tx_complete_clear()
+        .write(|w| unsafe { w.slots().bits(1 << slot) });
     if slot < 5 {
         WIFI_TX_SLOTS[slot].1.store(TX_DONE, Ordering::Relaxed);
         WIFI_TX_SLOTS[slot].0.wake();
     }
 }
 fn process_tx_timeout(slot: usize) {
-    unsafe { MAC_TXQ_ERROR_CLEAR.write_volatile(1 << (slot + 0x10)) };
+    unsafe { WIFI::steal() }
+        .tx_error_clear()
+        .modify(|r, w| unsafe { w.slot_timeout().bits(r.slot_timeout().bits() | (1 << slot)) });
     if slot < 5 {
-        set_txq_invalid(slot);
+        WiFi::set_tx_slot_invalid(unsafe { WIFI::steal() }.tx_slot_config(4 - slot));
         WIFI_TX_SLOTS[slot].1.store(TX_TIMEOUT, Ordering::Relaxed);
         WIFI_TX_SLOTS[slot].0.wake();
     }
 }
 fn process_collision(slot: usize) {
-    unsafe { MAC_TXQ_ERROR_CLEAR.write_volatile((slot + 0x10) as u32) };
+    unsafe { WIFI::steal() }
+        .tx_error_clear()
+        .modify(|r, w| unsafe {
+            w.slot_collision()
+                .bits(r.slot_collision().bits() | (1 << slot))
+        });
     if slot < 5 {
-        set_txq_invalid(slot);
+        WiFi::set_tx_slot_invalid(unsafe { WIFI::steal() }.tx_slot_config(slot));
         WIFI_TX_SLOTS[slot].1.store(TX_COLLISION, Ordering::Relaxed);
         WIFI_TX_SLOTS[slot].0.wake();
     }
@@ -202,120 +207,52 @@ fn process_collision(slot: usize) {
 
 #[ram]
 extern "C" fn interrupt_handler() {
-    let cause = unsafe { MAC_DMA_INT_STATUS.read_volatile() };
+    // We don't want to have to steal this all the time.
+    let wifi = unsafe { WIFI::steal() };
+
+    let cause = wifi.wifi_int_status().read().bits();
     if cause == 0 {
         return;
     }
-    unsafe { MAC_DMA_INT_CLEAR.write_volatile(cause) }
+    wifi.wifi_int_clear().write(|w| unsafe { w.bits(cause) });
     if cause & 0x1000024 != 0 {
         WIFI_RX_SIGNAL_QUEUE.put();
     } else if cause & 0x80 != 0 {
-        let mut txq_complete_status = unsafe { MAC_TXQ_COMPLETE_STATUS.read_volatile() };
+        //let mut txq_complete_status = wifi.txq_complete_status().read().bits();
+        let mut txq_complete_status = unsafe { WIFI::steal() }.tx_complete_status().read().bits();
         while txq_complete_status != 0 {
-            let slot = 31 - txq_complete_status.leading_zeros();
+            let slot = txq_complete_status.trailing_zeros();
             process_tx_complete(slot as usize);
             // We mask away, the bit for our slot.
             txq_complete_status &= !(1 << slot);
         }
     } else if cause & 0x80000 != 0 {
         // Timeout
-        let mut txq_error_status = unsafe { MAC_TXQ_ERROR_STATUS.read_volatile() } >> 0x10 & 0x7ff;
-        while txq_error_status != 0 {
-            let slot = 31 - txq_error_status.leading_zeros();
+        let mut tx_error_status = unsafe { WIFI::steal() }
+            .tx_error_status()
+            .read()
+            .slot_timeout()
+            .bits();
+        while tx_error_status != 0 {
+            let slot = tx_error_status.trailing_zeros();
             process_tx_timeout(slot as usize);
             // We mask away, the bit for our slot.
-            txq_error_status &= !(1 << slot);
+            tx_error_status &= !(1 << slot);
         }
     } else if cause & 0x100 != 0 {
         // Timeout
-        let mut txq_error_status = unsafe { MAC_TXQ_ERROR_STATUS.read_volatile() } & 0x7ff;
-        while txq_error_status != 0 {
-            let slot = 31 - txq_error_status.leading_zeros();
+        let mut tx_error_status = unsafe { WIFI::steal() }
+            .tx_error_status()
+            .read()
+            .slot_collision()
+            .bits();
+        while tx_error_status != 0 {
+            let slot = tx_error_status.trailing_zeros();
             process_collision(slot as usize);
             // We mask away, the bit for our slot.
-            txq_error_status &= !(1 << slot);
+            tx_error_status &= !(1 << slot);
         }
     }
-}
-fn enable_tx(slot: usize) {
-    let plcp0_ptr = plcp0(slot);
-    unsafe {
-        plcp0_ptr.write_volatile(plcp0_ptr.read_volatile() | 0xc0000000);
-    }
-}
-fn set_txq_invalid(slot: usize) {
-    let plcp0_ptr = plcp0(slot);
-    unsafe {
-        plcp0_ptr.write_volatile(plcp0_ptr.read_volatile() & 0xb0000000);
-    }
-}
-async fn transmit_internal(
-    dma_list_item: Pin<&TxDMAListItem>,
-    rate: WiFiRate,
-    slot: usize,
-) -> bool {
-    let tx_config_ptr = tx_config(slot);
-    let plcp0_ptr = plcp0(slot);
-    let plcp1_ptr = plcp1(slot);
-    let plcp2_ptr = plcp2(slot);
-    let duration_ptr = duration(slot);
-    let length = dma_list_item.buffer().len();
-    unsafe {
-        tx_config_ptr.write_volatile(tx_config_ptr.read_volatile() | 0xa);
-        plcp0_ptr.write_volatile(dma_list_item.get_ref() as *const _ as u32 & 0xfffff | 0x00600000);
-        plcp1_ptr.write_volatile(
-            0x10000000
-                | length as u32 & 0xfff
-                | ((rate.into_bits() as u32 & 0x1f) << 12)
-                | ((rate.is_ht() as u32) << 25),
-        );
-        plcp2_ptr.write_volatile(0x00000020);
-        duration_ptr.write_volatile(0);
-        if rate.is_ht() {
-            ht_sig(slot).write_volatile(
-                HtSig::new()
-                    .with_ht_length(length as u16)
-                    .with_mcs(rate.into_bits() & 0b111)
-                    .with_smoothing_recommended(true)
-                    .with_not_sounding(true)
-                    .with_short_gi(rate.is_short_gi())
-                    .into_bits(),
-            );
-            ht_unknown(slot).write_volatile(length as u32 & 0xffff | 0x50000);
-        }
-        // tx_config_ptr.write_volatile(tx_config_ptr.read_volatile() | 0x02000000);
-        // tx_config_ptr.write_volatile(tx_config_ptr.read_volatile() | 0x00003000);
-    }
-    enable_tx(slot);
-
-    // Wait for the hardware to confirm transmission.
-    poll_fn(|cx| match WIFI_TX_SLOTS[slot].1.load(Ordering::Relaxed) {
-        TX_DONE => {
-            WIFI_TX_SLOTS[slot]
-                .1
-                .store(TX_IN_PROGRESS_OR_FREE, Ordering::Relaxed);
-            Poll::Ready(true)
-        }
-        TX_TIMEOUT => {
-            WIFI_TX_SLOTS[slot]
-                .1
-                .store(TX_IN_PROGRESS_OR_FREE, Ordering::Relaxed);
-            Poll::Ready(false)
-        }
-        TX_COLLISION => {
-            WIFI_TX_SLOTS[slot].1.store(TX_COLLISION, Ordering::Relaxed);
-            Poll::Ready(false)
-        }
-        TX_IN_PROGRESS_OR_FREE => {
-            WIFI_TX_SLOTS[slot].0.register(cx.waker());
-            Poll::Pending
-        }
-        status => {
-            error!("TX slot status was set to invalid value: {status}");
-            Poll::Ready(false)
-        }
-    })
-    .await
 }
 
 /* /// What should be done, if a timeout occurs, while transmitting.
@@ -350,6 +287,7 @@ impl Drop for BorrowedBuffer<'_, '_> {
 }
 pub struct WiFi {
     radio_clock: RADIO_CLK,
+    wifi: WIFI,
     dma_list: Mutex<RefCell<DMAList>>,
 }
 impl WiFi {
@@ -415,31 +353,32 @@ impl WiFi {
     fn reset_mac(&mut self) {
         debug!("Reseting MAC.");
         self.radio_clock.reset_mac();
-        unsafe {
-            MAC_RX_CTRL_REG.write_volatile(MAC_RX_CTRL_REG.read_volatile() & 0x7fffffff);
-        }
+        self.wifi
+            .ctrl_reg()
+            .modify(|r, w| unsafe { w.bits(r.bits() & 0x7fffffff) });
     }
-    fn init_mac() {
+    fn init_mac(&self) {
         debug!("Initializing MAC.");
-        unsafe {
-            MAC_CTRL_REG.write_volatile(MAC_CTRL_REG.read_volatile() & 0xffffe800);
-        }
+        self.wifi
+            .ctrl_reg()
+            .modify(|r, w| unsafe { w.bits(r.bits() & 0xffffe800) });
     }
-    fn deinit_mac() {
+    fn deinit_mac(&self) {
         debug!("Deinitializing MAC.");
-        unsafe {
-            MAC_CTRL_REG.write_volatile(MAC_CTRL_REG.read_volatile() | 0x17ff);
-        }
-        while unsafe { MAC_CTRL_REG.read_volatile() } & 0x2000 != 0 {}
+        self.wifi.ctrl_reg().modify(|r, w| unsafe {
+            w.bits(r.bits() | 0x17ff);
+            while r.bits() & 0x2000 != 0 {}
+            w
+        });
     }
     pub fn change_channel(&self, channel_number: u8) {
         debug!("Changing channel to {channel_number}");
-        Self::deinit_mac();
+        self.deinit_mac();
         unsafe {
             chip_v7_set_chan_nomac(channel_number, 0);
             disable_wifi_agc();
         }
-        Self::init_mac();
+        self.init_mac();
         unsafe {
             enable_wifi_agc();
         }
@@ -463,16 +402,16 @@ impl WiFi {
         }
         Self::set_isr();
     }
-    fn ic_enable_rx() {
+    fn ic_enable_rx(&mut self) {
         debug!("Enabling RX.");
-        unsafe {
-            MAC_RX_CTRL_REG.write_volatile(MAC_RX_CTRL_REG.read_volatile() | 0x80000000);
-        }
+        self.wifi
+            .ctrl_reg()
+            .modify(|r, w| unsafe { w.bits(r.bits() | 0x80000000) });
     }
     fn chip_enable(&mut self) {
         debug!("chip_enable");
         self.set_rx_policy(3);
-        Self::ic_enable_rx();
+        self.ic_enable_rx();
     }
     fn set_rx_policy(&mut self, rx_policy: u8) {
         unsafe {
@@ -480,17 +419,18 @@ impl WiFi {
         }
     }
     /// Initialize the WiFi peripheral.
-    pub fn new(_wifi: WIFI, radio_clock: RADIO_CLK, _adc2: ADC2) -> Self {
+    pub fn new(wifi: WIFI, radio_clock: RADIO_CLK, _adc2: ADC2) -> Self {
         debug!("Initializing WiFi.");
         let mut temp = Self {
             radio_clock,
+            wifi,
             dma_list: Mutex::new(RefCell::new(DMAList::allocate(10))),
         };
         Self::enable_wifi_power_domain();
         temp.enable_clock(RadioPeripherals::Wifi);
         temp.phy_enable();
         temp.reset_mac();
-        Self::init_mac();
+        temp.init_mac();
         temp.change_channel(1);
         Self::ic_enable();
         temp.chip_enable();
@@ -522,6 +462,100 @@ impl WiFi {
             dma_list_item,
         }
     }
+    fn enable_tx_slot(tx_slot_config: &TX_SLOT_CONFIG) {
+        tx_slot_config
+            .plcp0()
+            .modify(|r, w| unsafe { w.bits(r.bits() | 0xc0000000) });
+    }
+    pub(crate) fn set_tx_slot_invalid(tx_slot_config: &TX_SLOT_CONFIG) {
+        tx_slot_config
+            .plcp0()
+            .modify(|r, w| unsafe { w.bits(r.bits() | 0xb0000000) });
+    }
+    async fn transmit_internal(
+        &self,
+        dma_list_item: Pin<&TxDMAListItem>,
+        rate: WiFiRate,
+        slot: usize,
+    ) -> bool {
+        let length = dma_list_item.buffer().len();
+
+        let tx_slot_config = self.wifi.tx_slot_config(4 - slot);
+        tx_slot_config
+            .config()
+            .modify(|r, w| unsafe { w.bits(r.bits() | 0xa) });
+        tx_slot_config.plcp0().write(|w| unsafe {
+            w.dma_addr()
+                .bits(dma_list_item.get_ref() as *const _ as u32)
+        });
+        tx_slot_config
+            .plcp0()
+            .modify(|r, w| unsafe { w.bits(r.bits() | 0x00600000) });
+
+        let tx_slot_parameters = self.wifi.tx_slot_parameters(4 - slot);
+        tx_slot_parameters.plcp1().write(|w| unsafe {
+            w.len()
+                .bits(length as u16)
+                .is_80211_n()
+                .bit(rate.is_ht())
+                .rate()
+                .bits(rate.into_bits())
+        });
+        tx_slot_parameters
+            .plcp2()
+            .write(|w| unsafe { w.bits(0x00000020) });
+        tx_slot_parameters
+            .duration()
+            .write(|w| unsafe { w.bits(0x0) });
+        if rate.is_ht() {
+            tx_slot_parameters.ht_sig().write(|w| unsafe {
+                w.bits(
+                    HtSig::new()
+                        .with_ht_length(length as u16)
+                        .with_mcs(rate.into_bits() & 0b111)
+                        .with_smoothing_recommended(true)
+                        .with_not_sounding(true)
+                        .with_short_gi(rate.is_short_gi())
+                        .into_bits(),
+                )
+            });
+            tx_slot_parameters
+                .ht_unknown()
+                .write(|w| unsafe { w.length().bits(length as u32) });
+        }
+        // tx_slot_config
+        //    .config()
+        //    .modify(|r, w| unsafe { w.bits(r.bits() | 0x02003000) });
+        Self::enable_tx_slot(tx_slot_config);
+        // Wait for the hardware to confirm transmission.
+        poll_fn(|cx| match WIFI_TX_SLOTS[slot].1.load(Ordering::Relaxed) {
+            TX_DONE => {
+                WIFI_TX_SLOTS[slot]
+                    .1
+                    .store(TX_IN_PROGRESS_OR_FREE, Ordering::Relaxed);
+                Poll::Ready(true)
+            }
+            TX_TIMEOUT => {
+                WIFI_TX_SLOTS[slot]
+                    .1
+                    .store(TX_IN_PROGRESS_OR_FREE, Ordering::Relaxed);
+                Poll::Ready(false)
+            }
+            TX_COLLISION => {
+                WIFI_TX_SLOTS[slot].1.store(TX_COLLISION, Ordering::Relaxed);
+                Poll::Ready(false)
+            }
+            TX_IN_PROGRESS_OR_FREE => {
+                WIFI_TX_SLOTS[slot].0.register(cx.waker());
+                Poll::Pending
+            }
+            status => {
+                error!("TX slot status was set to invalid value: {status}");
+                Poll::Ready(false)
+            }
+        })
+        .await
+    }
     /// Transmit a frame.
     pub async fn transmit(&self, buffer: &[u8], rate: WiFiRate) -> bool {
         let slot = WIFI_TX_SLOT_QUEUE.wait_for_slot().await;
@@ -533,7 +567,9 @@ impl WiFi {
         // And then pin it, before passing it to hardware.
         let dma_list_item = pin!(dma_list_item);
 
-        let tx_success = transmit_internal(dma_list_item.into_ref(), rate, *slot).await;
+        let tx_success = self
+            .transmit_internal(dma_list_item.into_ref(), rate, *slot)
+            .await;
         if tx_success {
             debug!("Finished transmission. Slot {} is now free again.", *slot);
         } else {

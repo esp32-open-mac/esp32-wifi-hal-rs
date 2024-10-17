@@ -47,7 +47,7 @@ fn init_heap() {
     }
 }
 
-static SSIDS: [&'static str; 6] = [
+static SSIDS: [&str; 6] = [
     "Never gonna give you up",
     "Never gonna let you down",
     "Never gonna run around",
@@ -101,8 +101,7 @@ async fn beacon_task(ssid: &'static str, id: u8, wifi: &'static WiFi) {
             },
         };
         let written = buffer.pwrite(frame, 0).unwrap();
-        wifi.transmit(&buffer[..written], WiFiRate::PhyRate54M)
-            .await;
+        wifi.transmit(&buffer[..written], WiFiRate::PhyRate6M).await;
         Timer::after_millis(100).await;
         seq_num += 1;
     }
@@ -112,7 +111,7 @@ async fn beacon_task(ssid: &'static str, id: u8, wifi: &'static WiFi) {
 async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     init_heap();
-    esp_println::logger::init_logger(LevelFilter::Warn);
+    esp_println::logger::init_logger(LevelFilter::Info);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);

@@ -20,6 +20,7 @@ use ieee80211::{
     scroll::Pwrite,
     ssid, supported_rates,
 };
+use log::LevelFilter;
 
 #[global_allocator]
 static ALLOCATOR: esp_alloc::EspHeap = esp_alloc::EspHeap::empty();
@@ -33,13 +34,13 @@ fn init_heap() {
     }
 }
 
-const SSID: &str = "The cake is a lie";
+const SSID: &str = "The cake is a lie.";
 
 #[main]
 async fn main(_spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     init_heap();
-    esp_println::logger::init_logger_from_env();
+    esp_println::logger::init_logger(LevelFilter::Info);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);

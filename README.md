@@ -1,5 +1,7 @@
 # esp32-wifi-hal-rs
 This repo contains an experimental port of esp32-open-mac to Rust, with embassy. It is not intended to replace the C version, but to explore, how this can be done in Rust idiomatically. We still rely on the proprietary blobs for initializing the RF frontend and some more minor initialization. 
+## DISCLAIMER
+This is experimental software. USE AT YOUR OWN RISK! We'll not take any liability for damage to the hardware. We do not condone the use of this for malicious purposes.
 ## Usage
 The crate is a library and there are example binaries in `src/bin/`. The only public API is the `WiFi` struct, which provides all currently implemented functioniality. Currently the RX policy is fixed to three, which means only beacons will be received.
 ## Building
@@ -8,5 +10,8 @@ To try one of these examples:
 1. Clone the repo
 2. Connect the ESP32
 3. Run `cargo run -r --bin [EXAMPLE_NAME_GOES_HERE]`
-## DISCLAIMER
-This is experimental software. USE AT YOUR OWN RISK! We'll not take any liability for damage to the hardware. We do not condone the use of this for malicious purposes.
+## Technical Notes
+The ESP32 WiFi peripheral has five TX slots, which we number 0-4. The MMIO addresses, where these are configured are in reverse order. This means, that slot zero starts at the HIGHEST address and slot four at the lowest. This numbering is also suggested by the TX status registers. We could in theory reverse this ordering to ascending addresses, this would however cause headaches with TX slot status handling, so we chose to stick with descending addresses. This is also the way the proprietary task handles this.
+
+We have reason to believe, that slot four is in some way special, as the TX completion handler in the proprietary task masks away the bit corresponding to that slot (See `hal_mac_get_txq_state`). However, as our tests do not indicate any special behaviour, we just use it like a normal slot.
+

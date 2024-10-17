@@ -6,33 +6,16 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-esp-hal = { git = "https://github.com/esp-rs/esp-hal", package = "esp-hal", features = [
+esp-hal = { path = "../esp-hal/esp-hal/", features = [
     "esp32",
 ] }
 log = { version = "0.4.21" }
 esp-alloc = "0.4.0"
 embedded-io = "0.6.1"
-esp-wifi = { git = "https://github.com/esp-rs/esp-hal", package = "esp-wifi", features = [
-    "esp32",
-    "phy-enable-usb",
-    "utils",
-    "wifi",
-] }
 heapless = { version = "0.8.0", default-features = false }
-smoltcp = { version = "0.11.0", default-features = false, features = [
-    "medium-ethernet",
-    "proto-dhcpv4",
-    "proto-igmp",
-    "proto-ipv4",
-    "socket-dhcpv4",
-    "socket-icmp",
-    "socket-raw",
-    "socket-tcp",
-    "socket-udp",
-] }
 embassy-futures = "0.1.1"
 embassy-time = { version = "0.3.1", features = ["generic-queue-8"] }
-esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal", package = "esp-hal-embassy", features = [
+esp-hal-embassy = { path = "../esp-hal/esp-hal-embassy/", features = [
     "esp32",
 ] }
 esp-wifi-sys = { version = "0.5.0", features = ["esp32"] }
@@ -41,15 +24,16 @@ static_cell = { version = "2.1.0", features = ["nightly"] }
 bitfield-struct = "0.8.0"
 atomic-waker = "1.1.2"
 embassy-sync = "0.6.0"
-esp-backtrace = { version = "0.14.0", features = [
+esp-backtrace = { path = "../esp-hal/esp-backtrace/", features = [
     "esp32",
     "panic-handler",
     "println",
 ] }
-esp-println = { version = "0.11.0", features = ["log"] }
+esp-println = { path = "../esp-hal/esp-println/", features = ["log"] }
 ieee80211 = { git = "https://github.com/Frostie314159/ieee80211-rs" }
 embassy-executor = { version = "0.6.0", features = ["task-arena-size-32768"] }
 macro-bits = "0.1.5"
+esp32 = { version = "0.33.0", path = "../esp-pacs/esp32" }
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization

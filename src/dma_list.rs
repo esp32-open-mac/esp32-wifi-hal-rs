@@ -4,14 +4,11 @@ use core::{
     ptr::{null_mut, NonNull},
     slice,
 };
+use esp32::WIFI;
 use log::{debug, trace};
 
 use alloc::boxed::Box;
 use bitfield_struct::bitfield;
-
-use crate::regs::{
-    base_rx_descr_ptr, last_rx_descr_ptr, next_rx_descr_ptr, MAC_BASE_RX_DESCR, MAC_RX_CTRL_REG,
-};
 
 #[bitfield(u32)]
 pub struct DMAListHeader {
@@ -106,12 +103,21 @@ pub struct DMAList {
 }
 impl DMAList {
     pub fn set_rx_base_addr(item: Option<NonNull<RxDMAListItem>>) {
-        unsafe {
-            MAC_BASE_RX_DESCR.write_volatile(match item {
+        unsafe { WIFI::steal() }.rx_descr_base().write(|w| unsafe {
+            w.bits(match item {
                 Some(dma_list_descriptor) => dma_list_descriptor.as_ptr(),
                 None => null_mut(),
-            })
-        }
+            } as _)
+        });
+    }
+    fn last_rx_descr_ptr() -> *mut RxDMAListItem {
+        unsafe { WIFI::steal() }.rx_descr_last().read().bits() as _
+    }
+    fn next_rx_descr_ptr() -> *mut RxDMAListItem {
+        unsafe { WIFI::steal() }.rx_descr_next().read().bits() as _
+    }
+    fn base_rx_descr_ptr() -> *mut RxDMAListItem {
+        unsafe { WIFI::steal() }.rx_descr_base().read().bits() as _
     }
     /// Allocates all buffers for the DMA list.
     pub fn allocate(buffer_count: usize) -> Self {
@@ -149,10 +155,11 @@ impl DMAList {
     /// This will update [MAC_NEXT_RX_DESCR] and [MAC_LAST_RX_DESCR].
     fn reload_rx_descriptors() {
         trace!("Reloading RX descriptors.");
-        unsafe {
-            MAC_RX_CTRL_REG.write_volatile(MAC_RX_CTRL_REG.read_volatile() | 1);
-            while MAC_RX_CTRL_REG.read_volatile() & 1 != 0 {}
-        }
+        unsafe { WIFI::steal() }.rx_ctrl().modify(|r, w| {
+            w.rx_descr_reload().bit(true);
+            while r.rx_descr_reload().bit() {}
+            w
+        });
     }
     /// Sets [Self::rx_chain_ptrs], with the `dma_list_descriptor` at the base.
     fn set_rx_chain_begin(&mut self, dma_list_descriptor: Option<NonNull<RxDMAListItem>>) {
@@ -196,8 +203,8 @@ impl DMAList {
             unsafe { rx_chain_ptrs.1.as_mut() }.set_next(Some(dma_list_descriptor));
             Self::reload_rx_descriptors();
 
-            let last_descr = last_rx_descr_ptr();
-            if base_rx_descr_ptr() as u32 == 0x3ff00000 {
+            let last_descr = Self::last_rx_descr_ptr();
+            if Self::base_rx_descr_ptr() as u32 == 0x3ff00000 {
                 trace!("Got weird value.");
                 if last_descr == dma_list_descriptor {
                     Self::set_rx_base_addr(unsafe { last_descr.as_mut().unwrap() }.next());
@@ -213,7 +220,10 @@ impl DMAList {
         );
     }
     pub fn log_stats() {
-        let (rx_next, rx_last) = (next_rx_descr_ptr() as u32, last_rx_descr_ptr() as u32);
+        let (rx_next, rx_last) = (
+            Self::next_rx_descr_ptr() as u32,
+            Self::last_rx_descr_ptr() as u32,
+        );
         trace!("DMA list: Next: {rx_next:x} Last: {rx_last:x}");
     }
 }
