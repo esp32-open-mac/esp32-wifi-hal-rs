@@ -102,6 +102,17 @@ pub struct DMAList {
     rx_chain_ptrs: Option<(NonNull<RxDMAListItem>, NonNull<RxDMAListItem>)>,
 }
 impl DMAList {
+    /// Tell the hardware to reload the DMA list.
+    ///
+    /// This will update [MAC_NEXT_RX_DESCR] and [MAC_LAST_RX_DESCR].
+    fn reload_rx_descriptors() {
+        trace!("Reloading RX descriptors.");
+        unsafe { WIFI::steal() }.rx_ctrl().modify(|r, w| {
+            w.rx_descr_reload().bit(true);
+            while r.rx_descr_reload().bit() {}
+            w
+        });
+    }
     pub fn set_rx_base_addr(item: Option<NonNull<RxDMAListItem>>) {
         unsafe { WIFI::steal() }.rx_descr_base().write(|w| unsafe {
             w.bits(match item {
@@ -146,20 +157,9 @@ impl DMAList {
     ///
     /// This was separated out from [Self::allocate], this is owned by the [crate::WiFi] struct and has to be initialized at the end.
     pub fn init(&mut self) {
-        debug!("Initialized DMA list.");
+        debug!("Initialized DMA list. {:?}", self.rx_chain_ptrs);
         Self::set_rx_base_addr(self.rx_chain_ptrs.map(|rx_chain_ptrs| rx_chain_ptrs.0));
         Self::log_stats();
-    }
-    /// Tell the hardware to reload the DMA list.
-    ///
-    /// This will update [MAC_NEXT_RX_DESCR] and [MAC_LAST_RX_DESCR].
-    fn reload_rx_descriptors() {
-        trace!("Reloading RX descriptors.");
-        unsafe { WIFI::steal() }.rx_ctrl().modify(|r, w| {
-            w.rx_descr_reload().bit(true);
-            while r.rx_descr_reload().bit() {}
-            w
-        });
     }
     /// Sets [Self::rx_chain_ptrs], with the `dma_list_descriptor` at the base.
     fn set_rx_chain_begin(&mut self, dma_list_descriptor: Option<NonNull<RxDMAListItem>>) {
