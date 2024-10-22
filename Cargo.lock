@@ -592,7 +592,7 @@ dependencies = [
 [[package]]
 name = "esp32"
 version = "0.33.0"
-source = "git+https://github.com/esp32-open-mac/esp-pacs#c4f46a1bf3955ee9c1f76519eabbfc7076a2512a"
+source = "git+https://github.com/esp32-open-mac/esp-pacs#755e9a1eaf5dff60e464a39e52e6f844fae32175"
 dependencies = [
  "critical-section",
  "vcell",
