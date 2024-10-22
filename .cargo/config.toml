@@ -3,7 +3,7 @@ runner = "espflash flash --monitor"
 
 
 [env]
-ESP_LOGLEVEL="INFO"
+ESP_LOG="INFO"
 ESPFLASH_BAUD = "460800"
 
 [build]
