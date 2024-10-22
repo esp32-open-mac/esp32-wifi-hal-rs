@@ -1,5 +1,5 @@
 [package]
-name = "esp32-open-mac-rs"
+name = "esp32-wifi-hal-rs"
 version = "0.1.0"
 authors = ["Frostie314159 <frostie.neuenhausen@gmail.com>"]
 edition = "2021"
