@@ -85,7 +85,7 @@ serializable_enum! {
     }
 }
 
-pub struct SignalQueue {
+struct SignalQueue {
     waker: AtomicWaker,
     queued_signals: AtomicUsize,
 }

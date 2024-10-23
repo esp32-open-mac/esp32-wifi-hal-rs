@@ -6,4 +6,4 @@ mod wmac;
 
 extern crate alloc;
 
-pub use wmac::{BorrowedBuffer, RxFilterBank, RxFilterInterface, WiFi, WiFiRate};
+pub use wmac::*;
