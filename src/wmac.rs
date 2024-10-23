@@ -267,9 +267,9 @@ pub struct BorrowedBuffer<'a: 'b, 'b> {
     dma_list: &'a Mutex<RefCell<DMAList>>,
     dma_list_item: &'b mut RxDMAListItem,
 }
-impl BorrowedBuffer<'_, '_> {
+impl<'a: 'b, 'b> BorrowedBuffer<'a, 'b> {
     /// Returns the actual MPDU from the buffer excluding the prepended [wifi_pkt_rx_ctrl_t].
-    pub fn mpdu_buffer(&self) -> &[u8] {
+    pub fn mpdu_buffer(&'a self) -> &'b [u8] {
         &self[size_of::<wifi_pkt_rx_ctrl_t>()..]
     }
 }

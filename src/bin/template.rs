@@ -3,7 +3,7 @@
 use core::mem::MaybeUninit;
 
 use embassy_executor::Spawner;
-use esp32_open_mac_rs::WiFi;
+use esp32_wifi_hal_rs::WiFi;
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 use log::LevelFilter;

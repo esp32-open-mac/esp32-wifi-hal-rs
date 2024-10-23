@@ -6,7 +6,7 @@ extern crate alloc;
 use core::mem::MaybeUninit;
 
 use embassy_executor::Spawner;
-use esp32_open_mac_rs::{RxFilterBank, RxFilterInterface, WiFi};
+use esp32_wifi_hal_rs::{RxFilterBank, RxFilterInterface, WiFi};
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 use esp_wifi_sys::include::wifi_pkt_rx_ctrl_t;

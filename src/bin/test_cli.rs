@@ -9,7 +9,7 @@ use alloc::{
 use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Instant, Ticker};
-use esp32_open_mac_rs::{RxFilterBank, RxFilterInterface, WiFi, WiFiRate};
+use esp32_wifi_hal_rs::{RxFilterBank, RxFilterInterface, WiFi, WiFiRate};
 use esp_backtrace as _;
 use esp_hal::{
     efuse::Efuse,
