@@ -5,7 +5,7 @@ use core::{
     slice,
 };
 use esp32::WIFI;
-use log::{debug, trace};
+use log::trace;
 
 use alloc::boxed::Box;
 use bitfield_struct::bitfield;
@@ -36,6 +36,8 @@ pub struct DMAListItem<Use> {
     _phantom: PhantomData<Use>,
     _phantom_pinned: PhantomPinned,
 }
+unsafe impl<Use> Sync for DMAListItem<Use> {}
+unsafe impl<Use> Send for DMAListItem<Use> {}
 impl DMAListItem<Rx> {
     /// Initialize a new [DMAListItem] for RX.
     ///
@@ -148,7 +150,7 @@ impl DMAList {
         }
         let rx_chain_begin = prev.unwrap();
         let rx_chain_last = rx_chain_last.unwrap();
-        debug!("Allocated DMA list with {buffer_count} buffers.");
+        trace!("Allocated DMA list with {buffer_count} buffers.");
         Self {
             rx_chain_ptrs: Some((rx_chain_begin, rx_chain_last)),
         }
@@ -157,7 +159,7 @@ impl DMAList {
     ///
     /// This was separated out from [Self::allocate], this is owned by the [crate::WiFi] struct and has to be initialized at the end.
     pub fn init(&mut self) {
-        debug!("Initialized DMA list. {:?}", self.rx_chain_ptrs);
+        trace!("Initialized DMA list. {:?}", self.rx_chain_ptrs);
         Self::set_rx_base_addr(self.rx_chain_ptrs.map(|rx_chain_ptrs| rx_chain_ptrs.0));
         Self::log_stats();
     }
@@ -227,6 +229,8 @@ impl DMAList {
         trace!("DMA list: Next: {rx_next:x} Last: {rx_last:x}");
     }
 }
+unsafe impl Sync for DMAList {}
+unsafe impl Send for DMAList {}
 impl Drop for DMAList {
     fn drop(&mut self) {
         while let Some(dma_list_descriptor) = self.take_first() {
