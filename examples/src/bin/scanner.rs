@@ -12,12 +12,21 @@ use alloc::{
 use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Ticker};
-use esp32_wifi_hal_rs::WiFi;
+use esp32_wifi_hal_rs::{DMAResources, WiFi};
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
+use esp_println::println;
 use ieee80211::{match_frames, mgmt_frame::BeaconFrame, GenericFrame};
 use log::{info, LevelFilter};
+macro_rules! mk_static {
+    ($t:ty,$val:expr) => {{
+        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+        #[deny(unused_attributes)]
+        let x = STATIC_CELL.uninit().write(($val));
+        x
+    }};
+}
 
 fn init_heap() {
     const HEAP_SIZE: usize = 32 * 1024;
@@ -33,23 +42,26 @@ fn init_heap() {
 }
 
 async fn scan_on_channel(wifi: &mut WiFi, known_ssids: &mut BTreeSet<String>) {
-    let received = wifi.receive().await;
-    let buffer = received.mpdu_buffer();
-    let res = match_frames! {
-        buffer,
-        beacon_frame = BeaconFrame => {
-            let ssid = beacon_frame.ssid().unwrap_or_default();
-            if known_ssids.insert(ssid.to_string()) {
-                info!("Found new AP with SSID: {ssid}");
+    loop {
+        let received = wifi.receive().await;
+        println!("RX");
+        let buffer = received.mpdu_buffer();
+        let res = match_frames! {
+            buffer,
+            beacon_frame = BeaconFrame => {
+                let ssid = beacon_frame.ssid().unwrap_or_default();
+                if known_ssids.insert(ssid.to_string()) {
+                    info!("Found new AP with SSID: {ssid}");
+                }
             }
+        };
+        if res.is_err() {
+            let generic_frame = GenericFrame::new(buffer, false).unwrap();
+            info!(
+                "Got non beacon frame of type: {:?}",
+                generic_frame.frame_control_field().frame_type()
+            );
         }
-    };
-    if res.is_err() {
-        let generic_frame = GenericFrame::new(buffer, false).unwrap();
-        info!(
-            "Got non beacon frame of type: {:?}",
-            generic_frame.frame_control_field().frame_type()
-        );
     }
 }
 
@@ -57,12 +69,18 @@ async fn scan_on_channel(wifi: &mut WiFi, known_ssids: &mut BTreeSet<String>) {
 async fn main(_spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     init_heap();
-    esp_println::logger::init_logger(LevelFilter::Info);
+    esp_println::logger::init_logger(LevelFilter::Trace);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
 
-    let mut wifi = WiFi::new(peripherals.WIFI, peripherals.RADIO_CLK, peripherals.ADC2);
+    let dma_resources = mk_static!(DMAResources<1500, 10>, DMAResources::new());
+    let mut wifi = WiFi::new(
+        peripherals.WIFI,
+        peripherals.RADIO_CLK,
+        peripherals.ADC2,
+        dma_resources,
+    );
     let mut known_ssids = BTreeSet::new();
     let mut hop_set = repeat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]).flatten();
     let mut hop_interval = Ticker::every(Duration::from_secs(1));

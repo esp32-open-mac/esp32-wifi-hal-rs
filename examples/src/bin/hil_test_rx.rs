@@ -4,7 +4,7 @@ use core::mem::MaybeUninit;
 
 use embassy_executor::Spawner;
 use embassy_time::Instant;
-use esp32_wifi_hal_rs::{RxFilterBank, RxFilterInterface, WiFi};
+use esp32_wifi_hal_rs::{DMAResources, RxFilterBank, RxFilterInterface, WiFi};
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
@@ -44,9 +44,12 @@ async fn main(_spawner: Spawner) {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
 
-    let wifi = mk_static!(
-        WiFi,
-        WiFi::new(peripherals.WIFI, peripherals.RADIO_CLK, peripherals.ADC2)
+    let dma_resources = mk_static!(DMAResources<1500, 10>, DMAResources::new());
+    let mut wifi = WiFi::new(
+        peripherals.WIFI,
+        peripherals.RADIO_CLK,
+        peripherals.ADC2,
+        dma_resources,
     );
     wifi.set_filter_status(RxFilterBank::BSSID, RxFilterInterface::Zero, true);
     wifi.set_filter_status(RxFilterBank::ReceiverAddress, RxFilterInterface::Zero, true);

@@ -9,7 +9,7 @@ use alloc::{
 use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Instant, Ticker};
-use esp32_wifi_hal_rs::{RxFilterBank, RxFilterInterface, WiFi, WiFiRate};
+use esp32_wifi_hal_rs::{DMAResources, RxFilterBank, RxFilterInterface, WiFi, WiFiRate};
 use esp_backtrace as _;
 use esp_hal::{
     efuse::Efuse,
@@ -36,6 +36,14 @@ use log::LevelFilter;
 extern crate alloc;
 use esp_alloc as _;
 
+macro_rules! mk_static {
+    ($t:ty,$val:expr) => {{
+        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+        #[deny(unused_attributes)]
+        let x = STATIC_CELL.uninit().write(($val));
+        x
+    }};
+}
 fn init_heap() {
     const HEAP_SIZE: usize = 32 * 1024;
     static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
@@ -433,7 +441,13 @@ async fn main(_spawner: Spawner) {
     .unwrap()
     .split();
 
-    let mut wifi = WiFi::new(peripherals.WIFI, peripherals.RADIO_CLK, peripherals.ADC2);
+    let dma_resources = mk_static!(DMAResources<1500, 10>, DMAResources::new());
+    let mut wifi = WiFi::new(
+        peripherals.WIFI,
+        peripherals.RADIO_CLK,
+        peripherals.ADC2,
+        dma_resources,
+    );
     let _ = uart0_tx.flush_async().await;
     let _ = writeln!(&mut uart0_tx, "READY");
     loop {

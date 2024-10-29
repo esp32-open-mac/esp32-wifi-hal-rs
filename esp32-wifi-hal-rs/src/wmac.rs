@@ -1,7 +1,7 @@
 use core::{
     cell::RefCell,
     future::poll_fn,
-    ops::Deref,
+    ops::{Deref, Range},
     pin::{pin, Pin},
     sync::atomic::{AtomicU8, AtomicUsize, Ordering},
     task::Poll,
@@ -9,7 +9,9 @@ use core::{
 
 use atomic_waker::AtomicWaker;
 use critical_section::Mutex;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
+};
 use esp32::wifi::TX_SLOT_CONFIG;
 use esp_hal::{
     get_core,
@@ -22,7 +24,6 @@ use esp_wifi_sys::include::{
     esp_phy_calibration_data_t, esp_phy_calibration_mode_t_PHY_RF_CAL_FULL, register_chipv7_phy,
     wifi_pkt_rx_ctrl_t,
 };
-use ieee80211::common::HtSig;
 use macro_bits::serializable_enum;
 
 use crate::{
@@ -31,8 +32,8 @@ use crate::{
         chip_v7_set_chan_nomac, disable_wifi_agc, enable_wifi_agc, hal_init, tx_pwctrl_background,
     },
     phy_init_data::PHY_INIT_DATA_DEFAULT,
+    DMAResources,
 };
-use log::{debug, error, trace, warn};
 
 serializable_enum! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -72,14 +73,17 @@ serializable_enum! {
     }
 }
 impl WiFiRate {
+    /// Check if the rate is using the HT PHY.
     pub const fn is_ht(&self) -> bool {
         self.into_bits() >= 0x10
     }
+    /// Check if the rate uses a short guard interval.
     pub const fn is_short_gi(&self) -> bool {
         self.into_bits() >= 0x18
     }
 }
 
+/// A synchronization primitive, which allows queueing a number signals, to be awaited.
 struct SignalQueue {
     waker: AtomicWaker,
     queued_signals: AtomicUsize,
@@ -111,14 +115,14 @@ impl SignalQueue {
         .await
     }
 }
-// Status codes for TX.
-const TX_IN_PROGRESS_OR_FREE: u8 = 0;
-const TX_DONE: u8 = 1;
-const TX_TIMEOUT: u8 = 2;
-const TX_COLLISION: u8 = 3;
 
 /// This is used to wait for a slot to become available.
 static WIFI_TX_SLOT_QUEUE: SlotManager = SlotManager::new();
+
+/// This is a slot borrowed from the slot queue.
+///
+/// It is used, to make sure that access to a slot is exclusive.
+/// It will return the slot back into the slot queue once dropped.
 struct BorrowedSlot {
     slot: usize,
 }
@@ -130,24 +134,33 @@ impl Deref for BorrowedSlot {
 }
 impl Drop for BorrowedSlot {
     fn drop(&mut self) {
+        // We can ignore the result here, because we know that this slot was taken from the queue,
+        // and therefore the queue must have space for it.
         let _ = WIFI_TX_SLOT_QUEUE.slots.try_send(self.slot);
     }
 }
+/// This keeps track of all the TX slots available, by using a queue of slot numbers in the
+/// background, which makes it possible to await a slot becoming free.
 struct SlotManager {
     slots: Channel<CriticalSectionRawMutex, usize, 5>,
 }
 impl SlotManager {
+    /// Create a new slot manager.
     pub const fn new() -> Self {
         Self {
             slots: Channel::new(),
         }
     }
-    pub fn init(&self, slots: impl IntoIterator<Item = usize>) {
-        assert!(self.slots.is_empty());
+    /// Fill the slot queue, with the given range of slot numbers.
+    ///
+    /// Making the range of slots to use dynamic here makes sense, because we're unsure about the
+    /// nature of slot four, and as such sometimes disable it for certain experiments.
+    pub fn init(&self, slots: Range<usize>) {
         slots.into_iter().for_each(|slot| {
             let _ = self.slots.try_send(slot);
         });
     }
+    /// Asynchronously wait for a new slot to become available.
     pub async fn wait_for_slot(&self) -> BorrowedSlot {
         BorrowedSlot {
             slot: self.slots.receive().await,
@@ -155,11 +168,19 @@ impl SlotManager {
     }
 }
 
+pub enum TxSlotStatus {
+    Done,
+    Timeout,
+    Collision,
+}
 static WIFI_RX_SIGNAL_QUEUE: SignalQueue = SignalQueue::new();
+
 #[allow(clippy::declare_interior_mutable_const)]
-const SLOT: (AtomicWaker, AtomicU8) = (AtomicWaker::new(), AtomicU8::new(TX_IN_PROGRESS_OR_FREE));
+const EMPTY_SLOT: Signal<CriticalSectionRawMutex, TxSlotStatus> = Signal::new();
 /// These are for knowing, when transmission has finished.
-static WIFI_TX_SLOTS: [(AtomicWaker, AtomicU8); 5] = [SLOT; 5];
+static WIFI_TX_SLOTS: [Signal<CriticalSectionRawMutex, TxSlotStatus>; 5] = [EMPTY_SLOT; 5];
+
+// We run tx_pwctrl_background every four transmissions.
 static FRAMES_SINCE_LAST_TXPWR_CTRL: AtomicU8 = AtomicU8::new(0);
 
 fn process_tx_complete(slot: usize) {
@@ -171,8 +192,7 @@ fn process_tx_complete(slot: usize) {
         .tx_complete_clear()
         .modify(|r, w| unsafe { w.bits(r.bits() | (1 << slot)) });
     if slot < 5 {
-        WIFI_TX_SLOTS[slot].1.store(TX_DONE, Ordering::Relaxed);
-        WIFI_TX_SLOTS[slot].0.wake();
+        WIFI_TX_SLOTS[slot].signal(TxSlotStatus::Done);
     }
 }
 fn process_tx_timeout(slot: usize) {
@@ -181,8 +201,7 @@ fn process_tx_timeout(slot: usize) {
         .modify(|r, w| unsafe { w.slot_timeout().bits(r.slot_timeout().bits() | (1 << slot)) });
     if slot < 5 {
         WiFi::set_tx_slot_invalid(unsafe { WIFI::steal() }.tx_slot_config(4 - slot));
-        WIFI_TX_SLOTS[slot].1.store(TX_TIMEOUT, Ordering::Relaxed);
-        WIFI_TX_SLOTS[slot].0.wake();
+        WIFI_TX_SLOTS[slot].signal(TxSlotStatus::Timeout);
     }
 }
 fn process_collision(slot: usize) {
@@ -194,8 +213,7 @@ fn process_collision(slot: usize) {
         });
     if slot < 5 {
         WiFi::set_tx_slot_invalid(unsafe { WIFI::steal() }.tx_slot_config(4 - slot));
-        WIFI_TX_SLOTS[slot].1.store(TX_COLLISION, Ordering::Relaxed);
-        WIFI_TX_SLOTS[slot].0.wake();
+        WIFI_TX_SLOTS[slot].signal(TxSlotStatus::Collision);
     }
 }
 
@@ -298,6 +316,8 @@ serializable_enum! {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WiFiError {
     InvalidChannel,
+    TxTimeout,
+    TxCollision,
 }
 pub type WiFiResult<T> = Result<T, WiFiError>;
 pub struct WiFi {
@@ -307,6 +327,7 @@ pub struct WiFi {
     current_channel: u8,
 }
 impl WiFi {
+    /// Returns the name of a radio peripheral.
     fn radio_peripheral_name(radio_peripheral: &RadioPeripherals) -> &'static str {
         match radio_peripheral {
             RadioPeripherals::Bt => "BT",
@@ -314,6 +335,7 @@ impl WiFi {
             RadioPeripherals::Wifi => "WiFi",
         }
     }
+    /// Enable the Wi-Fi power domain.
     fn enable_wifi_power_domain() {
         unsafe {
             let rtc_cntl = &*LPWR::ptr();
@@ -327,6 +349,7 @@ impl WiFi {
                 .modify(|_, w| w.wifi_force_iso().clear_bit());
         }
     }
+    /// Disable the Wi-Fi power domain.
     fn disable_wifi_power_domain() {
         unsafe {
             let rtc_cntl = &*LPWR::ptr();
@@ -339,22 +362,25 @@ impl WiFi {
                 .modify(|_, w| w.wifi_force_pd().set_bit());
         }
     }
-    fn enable_clock(&mut self, radio_peripheral: RadioPeripherals) {
+    /// Enable the specified clock.
+    fn enable_clock(radio_clock: &mut RADIO_CLK, radio_peripheral: RadioPeripherals) {
         trace!(
             "Enabling {} clock.",
             Self::radio_peripheral_name(&radio_peripheral)
         );
-        self.radio_clock.enable(radio_peripheral);
+        radio_clock.enable(radio_peripheral);
     }
-    fn disable_clock(&mut self, radio_peripheral: RadioPeripherals) {
+    /// Disable the specified clock.
+    fn disable_clock(radio_clock: &mut RADIO_CLK, radio_peripheral: RadioPeripherals) {
         trace!(
             "Disabling {} clock.",
             Self::radio_peripheral_name(&radio_peripheral)
         );
-        self.radio_clock.disable(radio_peripheral);
+        radio_clock.disable(radio_peripheral);
     }
-    fn phy_enable(&mut self) {
-        self.enable_clock(RadioPeripherals::Phy);
+    /// Enable the PHY.
+    fn phy_enable(radio_clock: &mut RADIO_CLK) {
+        Self::enable_clock(radio_clock, RadioPeripherals::Phy);
         let mut cal_data = [0u8; size_of::<esp_phy_calibration_data_t>()];
         let init_data = &PHY_INIT_DATA_DEFAULT;
         trace!("Enabling PHY.");
@@ -366,22 +392,23 @@ impl WiFi {
             );
         }
     }
-    fn reset_mac(&mut self) {
+    /// Reset the MAC.
+    fn reset_mac(radio_clock: &mut RADIO_CLK, wifi: &WIFI) {
         trace!("Reseting MAC.");
-        self.radio_clock.reset_mac();
-        self.wifi
-            .ctrl()
+        radio_clock.reset_mac();
+        wifi.ctrl()
             .modify(|r, w| unsafe { w.bits(r.bits() & 0x7fffffff) });
     }
-    fn init_mac(&self) {
+    /// Initialize the MAC.
+    fn init_mac(wifi: &WIFI) {
         trace!("Initializing MAC.");
-        self.wifi
-            .ctrl()
+        wifi.ctrl()
             .modify(|r, w| unsafe { w.bits(r.bits() & 0xffffe800) });
     }
-    fn deinit_mac(&self) {
+    /// Deinitialize the MAC.
+    fn deinit_mac(wifi: &WIFI) {
         trace!("Deinitializing MAC.");
-        self.wifi.ctrl().modify(|r, w| unsafe {
+        wifi.ctrl().modify(|r, w| unsafe {
             w.bits(r.bits() | 0x17ff);
             while r.bits() & 0x2000 != 0 {}
             w
@@ -396,12 +423,12 @@ impl WiFi {
             return Err(WiFiError::InvalidChannel);
         }
         trace!("Changing channel to {channel_number}");
-        self.deinit_mac();
+        Self::deinit_mac(&self.wifi);
         unsafe {
             chip_v7_set_chan_nomac(channel_number, 0);
             disable_wifi_agc();
         }
-        self.init_mac();
+        Self::init_mac(&self.wifi);
         unsafe {
             enable_wifi_agc();
         }
@@ -412,6 +439,7 @@ impl WiFi {
     pub fn get_channel(&self) -> u8 {
         self.current_channel
     }
+    /// Set the interrupt handler.
     fn set_isr() {
         trace!("Setting interrupt handler.");
         unsafe {
@@ -431,33 +459,36 @@ impl WiFi {
         }
         Self::set_isr();
     }
-    fn ic_enable_rx(&mut self) {
+    fn ic_enable_rx(wifi: &WIFI) {
         trace!("Enabling RX.");
-        self.wifi.rx_ctrl().write(|w| w.rx_enable().bit(true));
+        wifi.rx_ctrl().write(|w| w.rx_enable().bit(true));
     }
-    fn chip_enable(&mut self) {
+    fn chip_enable(wifi: &WIFI) {
         trace!("chip_enable");
-        self.ic_enable_rx();
+        Self::ic_enable_rx(wifi);
     }
     /// Initialize the WiFi peripheral.
-    pub fn new(wifi: WIFI, radio_clock: RADIO_CLK, _adc2: ADC2) -> Self {
+    pub fn new<const BUFFER_SIZE: usize, const BUFFER_COUNT: usize>(
+        wifi: WIFI,
+        mut radio_clock: RADIO_CLK,
+        _adc2: ADC2,
+        dma_resources: &'static mut DMAResources<BUFFER_SIZE, BUFFER_COUNT>,
+    ) -> Self {
         trace!("Initializing WiFi.");
-        let mut temp = Self {
-            radio_clock,
-            wifi,
-            dma_list: Mutex::new(RefCell::new(DMAList::allocate(10))),
-            current_channel: 1,
-        };
         Self::enable_wifi_power_domain();
-        temp.enable_clock(RadioPeripherals::Wifi);
-        temp.phy_enable();
-        temp.reset_mac();
-        temp.init_mac();
-        temp.set_channel(1).unwrap();
+        Self::enable_clock(&mut radio_clock, RadioPeripherals::Wifi);
+        Self::phy_enable(&mut radio_clock);
+        Self::reset_mac(&mut radio_clock, &wifi);
+        Self::init_mac(&wifi);
         Self::ic_enable();
-        temp.chip_enable();
-        // Initialize DMA list.
-        critical_section::with(|cs| temp.dma_list.borrow_ref_mut(cs).init());
+        Self::chip_enable(&wifi);
+        let mut temp = Self {
+            wifi,
+            radio_clock,
+            current_channel: 1,
+            dma_list: Mutex::new(RefCell::new(DMAList::new(dma_resources))),
+        };
+        temp.set_channel(1).unwrap();
         WIFI_TX_SLOT_QUEUE.init(0..5);
         debug!("WiFi MAC init complete.");
         temp
@@ -485,22 +516,25 @@ impl WiFi {
             dma_list_item,
         }
     }
+    /// Enable the transmission slot.
     fn enable_tx_slot(tx_slot_config: &TX_SLOT_CONFIG) {
         tx_slot_config
             .plcp0()
             .modify(|r, w| unsafe { w.bits(r.bits() | 0xc0000000) });
     }
+    /// Invalidate the transmission slot.
     pub(crate) fn set_tx_slot_invalid(tx_slot_config: &TX_SLOT_CONFIG) {
         tx_slot_config
             .plcp0()
             .modify(|r, w| unsafe { w.bits(r.bits() | 0xb0000000) });
     }
+    /// Set the packet for transmission.
     async fn transmit_internal(
         &self,
         dma_list_item: Pin<&TxDMAListItem>,
         rate: WiFiRate,
         slot: usize,
-    ) -> bool {
+    ) -> WiFiResult<()> {
         let length = dma_list_item.buffer().len();
 
         let tx_slot_config = self.wifi.tx_slot_config(4 - slot);
@@ -533,13 +567,10 @@ impl WiFi {
         if rate.is_ht() {
             tx_slot_parameters.ht_sig().write(|w| unsafe {
                 w.bits(
-                    HtSig::new()
-                        .with_ht_length(length as u16)
-                        .with_mcs(rate.into_bits() & 0b111)
-                        .with_smoothing_recommended(true)
-                        .with_not_sounding(true)
-                        .with_short_gi(rate.is_short_gi())
-                        .into_bits(),
+                    (rate.into_bits() as u32 & 0b111)
+                        | (length as u32 & 0xffff << 8)
+                        | (0b111 << 24)
+                        | ((rate.is_short_gi() as u32) << 31),
                 )
             });
             tx_slot_parameters
@@ -555,43 +586,21 @@ impl WiFi {
             slot: usize,
         }
         impl CancelOnDrop<'_> {
-            async fn wait_for_tx_complete(&self) -> bool {
-                let slot = self.slot;
+            async fn wait_for_tx_complete(&self) -> WiFiResult<()> {
                 // Wait for the hardware to confirm transmission.
-                poll_fn(|cx| match WIFI_TX_SLOTS[slot].1.load(Ordering::Relaxed) {
-                    TX_DONE => {
-                        WIFI_TX_SLOTS[slot]
-                            .1
-                            .store(TX_IN_PROGRESS_OR_FREE, Ordering::Relaxed);
-                        Poll::Ready(true)
-                    }
-                    TX_TIMEOUT => {
-                        WIFI_TX_SLOTS[slot]
-                            .1
-                            .store(TX_IN_PROGRESS_OR_FREE, Ordering::Relaxed);
-                        Poll::Ready(false)
-                    }
-                    TX_COLLISION => {
-                        WIFI_TX_SLOTS[slot]
-                            .1
-                            .store(TX_IN_PROGRESS_OR_FREE, Ordering::Relaxed);
-                        Poll::Ready(false)
-                    }
-                    TX_IN_PROGRESS_OR_FREE => {
-                        WIFI_TX_SLOTS[slot].0.register(cx.waker());
-                        Poll::Pending
-                    }
-                    status => {
-                        error!("TX slot status was set to invalid value: {status}");
-                        Poll::Ready(false)
-                    }
-                })
-                .await
+                let res = match WIFI_TX_SLOTS[self.slot].wait().await {
+                    TxSlotStatus::Done => Ok(()),
+                    TxSlotStatus::Collision => Err(WiFiError::TxCollision),
+                    TxSlotStatus::Timeout => Err(WiFiError::TxTimeout),
+                };
+                WIFI_TX_SLOTS[self.slot].reset();
+                res
             }
         }
         impl Drop for CancelOnDrop<'_> {
             fn drop(&mut self) {
                 WiFi::set_tx_slot_invalid(self.tx_slot_config);
+                WIFI_TX_SLOTS[self.slot].reset();
             }
         }
         CancelOnDrop {
@@ -604,7 +613,7 @@ impl WiFi {
     /// Transmit a frame.
     ///
     /// NOTE: An FCS must be attached.
-    pub async fn transmit(&self, buffer: &[u8], rate: WiFiRate) -> bool {
+    pub async fn transmit(&self, buffer: &[u8], rate: WiFiRate) -> WiFiResult<()> {
         let slot = WIFI_TX_SLOT_QUEUE.wait_for_slot().await;
         trace!("Acquired slot {}.", *slot);
 
@@ -614,15 +623,8 @@ impl WiFi {
         // And then pin it, before passing it to hardware.
         let dma_list_item = pin!(dma_list_item);
 
-        let tx_success = self
-            .transmit_internal(dma_list_item.into_ref(), rate, *slot)
-            .await;
-        if tx_success {
-            trace!("Finished transmission. Slot {} is now free again.", *slot);
-        } else {
-            warn!("Timeout occured for slot {}.", *slot);
-        }
-        tx_success
+        self.transmit_internal(dma_list_item.into_ref(), rate, *slot)
+            .await
     }
     pub fn set_filter_status(
         &mut self,
@@ -686,8 +688,8 @@ generate_stat_accessors![hw_stat_panic];
 impl Drop for WiFi {
     fn drop(&mut self) {
         // Ensure, that the radio clocks and the power domain are disabled.
-        self.disable_clock(RadioPeripherals::Wifi);
-        self.disable_clock(RadioPeripherals::Phy);
+        Self::disable_clock(&mut self.radio_clock, RadioPeripherals::Wifi);
+        Self::disable_clock(&mut self.radio_clock, RadioPeripherals::Phy);
         Self::disable_wifi_power_domain();
     }
 }

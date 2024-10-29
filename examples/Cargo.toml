@@ -1,0 +1,50 @@
+[package]
+name = "examples"
+version = "0.1.0"
+authors = ["Frostie314159 <frostie.neuenhausen@gmail.com>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+
+esp32-wifi-hal-rs = { path = "../esp32-wifi-hal-rs/" }
+
+# ESP-HAL dependencies
+esp-hal = { git = "https://github.com/esp32-open-mac/esp-hal", package = "esp-hal", features = [
+    "esp32",
+] }
+esp-hal-embassy = { git = "https://github.com/esp32-open-mac/esp-hal", package = "esp-hal-embassy", features = [
+    "esp32",
+] }
+esp-alloc = { git = "https://github.com/esp32-open-mac/esp-hal", package = "esp-alloc" }
+esp-backtrace = { git = "https://github.com/esp32-open-mac/esp-hal", package = "esp-backtrace", features = [
+    "esp32",
+    "panic-handler",
+    "println",
+] }
+esp-println = { git = "https://github.com/esp32-open-mac/esp-hal", package = "esp-println", features = ["log"] }
+
+# Embassy dependencies
+embassy-time = { version = "0.3.1", features = ["generic-queue-8"] }
+embassy-executor = { version = "0.6.0" }
+
+# Misc
+log = "0.4.21"
+static_cell = { version = "2.1.0" }
+ieee80211 = { git = "https://github.com/Frostie314159/ieee80211-rs", version = "0.5.0", default-features = false }
+embedded-io-async = "0.6.1"
+embassy-futures = "0.1.1"
+
+[profile.dev]
+# Rust debug is too slow.
+# For debug builds always builds with some optimization
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1 # LLVM can perform better optimizations using a single thread
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 's'
+overflow-checks = false
