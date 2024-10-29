@@ -243,7 +243,7 @@ async fn beacon_command<'a>(
             .sequence_control
             .set_sequence_number(seq_num);
         let written = buf.pwrite(beacon_template, 0).unwrap();
-        wifi.transmit(&buf[..written], WiFiRate::PhyRate6M).await;
+        let _ = wifi.transmit(&buf[..written], WiFiRate::PhyRate6M).await;
         seq_num += 1;
         beacon_interval.next().await;
     }

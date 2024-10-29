@@ -56,7 +56,7 @@ async fn main(_spawner: Spawner) {
     esp_hal_embassy::init(timg0.timer0);
 
     let dma_resources = mk_static!(DMAResources<1500, 10>, DMAResources::new());
-    let mut wifi = WiFi::new(
+    let wifi = WiFi::new(
         peripherals.WIFI,
         peripherals.RADIO_CLK,
         peripherals.ADC2,
@@ -107,7 +107,7 @@ async fn main(_spawner: Spawner) {
             },
         };
         let written = buffer.pwrite(frame, 0).unwrap();
-        wifi.transmit(&buffer[..written], WiFiRate::PhyRate6M).await;
+        let _ = wifi.transmit(&buffer[..written], WiFiRate::PhyRate6M).await;
         seq_num += 1;
         beacon_ticker.next().await;
     }
