@@ -267,13 +267,15 @@ extern "C" fn interrupt_handler() {
     }
 }
 
-/* /// What should be done, if a timeout occurs, while transmitting.
-pub enum TxTimeoutBehaviour {
-    /// Retry transmitting the ppdu over and over again.
-    Retry,
-    /// Drop the ppdu.
+/// What should be done, if an error occurs, while transmitting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TxErrorBehaviour {
+    /// Retry as many times, as specified.
+    RetryUntil(usize),
+    /// Drop the MPDU.
+    #[default]
     Drop,
-} */
+}
 
 /// A buffer borrowed from the DMA list.
 pub struct BorrowedBuffer<'a: 'b, 'b> {
@@ -612,8 +614,17 @@ impl WiFi {
     }
     /// Transmit a frame.
     ///
-    /// NOTE: An FCS must be attached.
-    pub async fn transmit(&self, buffer: &[u8], rate: WiFiRate) -> WiFiResult<()> {
+    /// An FCS must be attached.
+    ///
+    /// You must set a [TxErrorBehaviour], so the driver knows what to do in case of a TX error.
+    /// The advantage of using this instead of bit banging a higher layer fix is, that we don't
+    /// have to reacquire a TX slot every time TX fails.
+    pub async fn transmit(
+        &self,
+        buffer: &[u8],
+        rate: WiFiRate,
+        error_behaviour: TxErrorBehaviour,
+    ) -> WiFiResult<()> {
         let slot = WIFI_TX_SLOT_QUEUE.wait_for_slot().await;
         trace!("Acquired slot {}.", *slot);
 
@@ -622,9 +633,24 @@ impl WiFi {
 
         // And then pin it, before passing it to hardware.
         let dma_list_item = pin!(dma_list_item);
+        let dma_list_ref = dma_list_item.into_ref();
 
-        self.transmit_internal(dma_list_item.into_ref(), rate, *slot)
-            .await
+        match error_behaviour {
+            TxErrorBehaviour::Drop => self.transmit_internal(dma_list_ref, rate, *slot).await,
+            TxErrorBehaviour::RetryUntil(retries) => {
+                let mut res = self.transmit_internal(dma_list_ref, rate, *slot).await;
+                if res.is_err() {
+                    for _ in 0..retries {
+                        res = self.transmit_internal(dma_list_ref, rate, *slot).await;
+                        if res.is_ok() {
+                            break;
+                        }
+                    }
+                }
+
+                res
+            }
+        }
     }
     pub fn set_filter_status(
         &mut self,
