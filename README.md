@@ -3,7 +3,9 @@ This repo contains an experimental port of esp32-open-mac to Rust, with embassy.
 ## DISCLAIMER
 This is experimental software. USE AT YOUR OWN RISK! We'll not take any liability for damage to the hardware. We do not condone the use of this for malicious purposes.
 ## Usage
-The crate is a library and there are example binaries in `src/bin/`. The only public API is the `WiFi` struct, which provides all currently implemented functioniality. Currently the RX policy is fixed to three, which means only beacons will be received.
+The actual crate lives in `esp32-wifi-hal-rs/` and examples are in `examples/`.
+
+For further information see the docs.
 ## Building
 To set up a development environment follow the guide at https://docs.esp-rs.org/book/installation/index.html. Since this only works on the ESP32 right now, only the Xtensa section is of interest.
 To try one of these examples:
