@@ -110,7 +110,11 @@ impl<const BUFFER_SIZE: usize, const BUFFER_COUNT: usize> DMAResources<BUFFER_SI
             dma_list_items: [RxDMAListItem::UNINIT; BUFFER_COUNT],
         }
     }
-    fn init(&'static mut self) -> (NonNull<RxDMAListItem>, NonNull<RxDMAListItem>) {
+    /// Initialize the DMA resources.
+    ///
+    /// SAFETY:
+    /// You must ensure, that this is only used as long as the DMA list lives!
+    unsafe fn init(&mut self) -> (NonNull<RxDMAListItem>, NonNull<RxDMAListItem>) {
         for (i, dma_list_item) in self.dma_list_items.iter_mut().enumerate() {
             dma_list_item.init_for_rx(&mut self.buffers[i], None);
         }
@@ -132,10 +136,11 @@ impl<const BUFFER_SIZE: usize, const BUFFER_COUNT: usize> Default
     }
 }
 
-pub struct DMAList {
+pub struct DMAList<'a> {
     rx_chain_ptrs: Option<(NonNull<RxDMAListItem>, NonNull<RxDMAListItem>)>,
+    _phantom: PhantomData<&'a ()>,
 }
-impl DMAList {
+impl<'a> DMAList<'a> {
     /// Tell the hardware to reload the DMA list.
     ///
     /// This will update [MAC_NEXT_RX_DESCR] and [MAC_LAST_RX_DESCR].
@@ -166,14 +171,15 @@ impl DMAList {
     }
     /// Instantiate a new DMAList.
     pub fn new<const BUFFER_SIZE: usize, const BUFFER_COUNT: usize>(
-        resources: &'static mut DMAResources<BUFFER_SIZE, BUFFER_COUNT>,
+        resources: &'a mut DMAResources<BUFFER_SIZE, BUFFER_COUNT>,
     ) -> Self {
-        let rx_chain_ptrs = resources.init();
+        let rx_chain_ptrs = unsafe { resources.init() };
         Self::set_rx_base_addr(Some(rx_chain_ptrs.0));
         debug!("Initialized DMA list.");
         Self::log_stats();
         Self {
             rx_chain_ptrs: Some(rx_chain_ptrs),
+            _phantom: PhantomData,
         }
     }
     /// Sets [Self::rx_chain_ptrs], with the `dma_list_descriptor` at the base.
@@ -194,7 +200,7 @@ impl DMAList {
         Self::set_rx_base_addr(dma_list_descriptor)
     }
     /// Take the first [DMAListItem] out of the list.
-    pub fn take_first<'a>(&mut self) -> Option<&'a mut RxDMAListItem> {
+    pub fn take_first<'b>(&mut self) -> Option<&'b mut RxDMAListItem> {
         let first = unsafe { self.rx_chain_ptrs.unwrap().0.as_mut() };
         trace!("Taking buffer: {:x} from DMA list.", first as *mut _ as u32);
         if first.dma_list_header.has_data() {
@@ -243,5 +249,5 @@ impl DMAList {
         debug!("DMA list: Next: {rx_next:x} Last: {rx_last:x}");
     }
 }
-unsafe impl Sync for DMAList {}
-unsafe impl Send for DMAList {}
+unsafe impl Sync for DMAList<'_> {}
+unsafe impl Send for DMAList<'_> {}

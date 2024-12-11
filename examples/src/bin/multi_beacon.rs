@@ -8,7 +8,7 @@ use core::{marker::PhantomData, mem::MaybeUninit};
 
 use embassy_executor::Spawner;
 use embassy_time::{Instant, Timer};
-use esp32_wifi_hal_rs::{DMAResources, WiFi, WiFiRate};
+use esp32_wifi_hal_rs::{DMAResources, TxErrorBehaviour, WiFi, WiFiRate};
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal_embassy::main;
@@ -59,7 +59,7 @@ static SSIDS: [&str; 6] = [
 ];
 
 #[embassy_executor::task(pool_size = 6)]
-async fn beacon_task(ssid: &'static str, id: u8, wifi: &'static WiFi) {
+async fn beacon_task(ssid: &'static str, id: u8, wifi: &'static WiFi<'static>) {
     let start_timestamp = Instant::now();
     let mut seq_num = 0;
     let mac_address = MACAddress::new([0x00, 0x80, 0x41, 0x13, 0x37, id]);
@@ -103,7 +103,13 @@ async fn beacon_task(ssid: &'static str, id: u8, wifi: &'static WiFi) {
             },
         };
         let written = buffer.pwrite(frame, 0).unwrap();
-        let _ = wifi.transmit(&buffer[..written], WiFiRate::PhyRate6M).await;
+        let _ = wifi
+            .transmit(
+                &buffer[..written],
+                WiFiRate::PhyRate6M,
+                TxErrorBehaviour::Drop,
+            )
+            .await;
         Timer::after_millis(100).await;
         seq_num += 1;
     }

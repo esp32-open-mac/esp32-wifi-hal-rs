@@ -33,6 +33,7 @@ bitfield-struct = "0.8.0"
 atomic-waker = "1.1.2"
 macro-bits = "0.1.5"
 defmt = { version = "0.3.8", optional = true }
+ieee80211 = { git = "https://github.com/Frostie314159/ieee80211-rs", version = "0.5.0", default-features = false }
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization

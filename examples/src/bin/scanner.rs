@@ -16,7 +16,6 @@ use esp32_wifi_hal_rs::{DMAResources, WiFi};
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
-use esp_println::println;
 use ieee80211::{match_frames, mgmt_frame::BeaconFrame, GenericFrame};
 use log::{info, LevelFilter};
 macro_rules! mk_static {
@@ -41,10 +40,9 @@ fn init_heap() {
     }
 }
 
-async fn scan_on_channel(wifi: &mut WiFi, known_ssids: &mut BTreeSet<String>) {
+async fn scan_on_channel(wifi: &mut WiFi<'_>, known_ssids: &mut BTreeSet<String>) {
     loop {
         let received = wifi.receive().await;
-        println!("RX");
         let buffer = received.mpdu_buffer();
         let res = match_frames! {
             buffer,

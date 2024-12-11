@@ -1,6 +1,7 @@
 use core::{
     cell::RefCell,
     future::poll_fn,
+    mem,
     ops::{Deref, Range},
     pin::{pin, Pin},
     sync::atomic::{AtomicU8, AtomicUsize, Ordering},
@@ -12,6 +13,7 @@ use critical_section::Mutex;
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
+use embassy_time::Instant;
 use esp32::wifi::TX_SLOT_CONFIG;
 use esp_hal::{
     get_core,
@@ -24,7 +26,7 @@ use esp_wifi_sys::include::{
     esp_phy_calibration_data_t, esp_phy_calibration_mode_t_PHY_RF_CAL_FULL, register_chipv7_phy,
     wifi_pkt_rx_ctrl_t,
 };
-use macro_bits::serializable_enum;
+use macro_bits::{bit, check_bit, serializable_enum};
 
 use crate::{
     dma_list::{DMAList, DMAListItem, RxDMAListItem, TxDMAListItem},
@@ -278,20 +280,36 @@ pub enum TxErrorBehaviour {
 }
 
 /// A buffer borrowed from the DMA list.
-pub struct BorrowedBuffer<'a: 'b, 'b> {
-    dma_list: &'a Mutex<RefCell<DMAList>>,
-    dma_list_item: &'b mut RxDMAListItem,
+pub struct BorrowedBuffer<'res, 'a> {
+    dma_list: &'a Mutex<RefCell<DMAList<'res>>>,
+    dma_list_item: &'a mut RxDMAListItem,
 }
-impl<'a: 'b, 'b> BorrowedBuffer<'a, 'b> {
-    /// Returns the actual MPDU from the buffer excluding the prepended [wifi_pkt_rx_ctrl_t].
-    pub fn mpdu_buffer(&'a self) -> &'b [u8] {
-        &self[size_of::<wifi_pkt_rx_ctrl_t>()..]
-    }
-}
-impl Deref for BorrowedBuffer<'_, '_> {
-    type Target = [u8];
-    fn deref(&self) -> &Self::Target {
+impl<'res, 'a> BorrowedBuffer<'res, 'a> {
+    /// Returns the complete buffer returned by the hardware.
+    ///
+    /// This includes the header added by the hardware.
+    pub fn raw_buffer(&self) -> &[u8] {
         self.dma_list_item.buffer()
+    }
+    /// Returns the actual MPDU from the buffer excluding the prepended [wifi_pkt_rx_ctrl_t].
+    pub fn mpdu_buffer(&self) -> &[u8] {
+        &self.raw_buffer()[size_of::<wifi_pkt_rx_ctrl_t>()..]
+    }
+    /// Returns the header attached by the hardware.
+    pub fn header_buffer(&self) -> &[u8] {
+        &self.raw_buffer()[0..size_of::<wifi_pkt_rx_ctrl_t>()]
+    }
+    /// The Received Signal Strength Indicator (RSSI).
+    pub fn rssi(&self) -> i8 {
+        self.header_buffer()[0] as i8 - 96
+    }
+    /// Is the frame intended for interface zero.
+    pub fn interface_zero(&self) -> bool {
+        check_bit!(self.header_buffer()[3], bit!(4))
+    }
+    /// Is the frame intended for interface one.
+    pub fn interface_one(&self) -> bool {
+        check_bit!(self.header_buffer()[3], bit!(5))
     }
 }
 impl Drop for BorrowedBuffer<'_, '_> {
@@ -322,13 +340,13 @@ pub enum WiFiError {
     TxCollision,
 }
 pub type WiFiResult<T> = Result<T, WiFiError>;
-pub struct WiFi {
+pub struct WiFi<'res> {
     radio_clock: RADIO_CLK,
     wifi: WIFI,
-    dma_list: Mutex<RefCell<DMAList>>,
+    dma_list: Mutex<RefCell<DMAList<'res>>>,
     current_channel: u8,
 }
-impl WiFi {
+impl<'res> WiFi<'res> {
     /// Returns the name of a radio peripheral.
     fn radio_peripheral_name(radio_peripheral: &RadioPeripherals) -> &'static str {
         match radio_peripheral {
@@ -474,12 +492,13 @@ impl WiFi {
         wifi: WIFI,
         mut radio_clock: RADIO_CLK,
         _adc2: ADC2,
-        dma_resources: &'static mut DMAResources<BUFFER_SIZE, BUFFER_COUNT>,
+        dma_resources: &'res mut DMAResources<BUFFER_SIZE, BUFFER_COUNT>,
     ) -> Self {
         trace!("Initializing WiFi.");
         Self::enable_wifi_power_domain();
         Self::enable_clock(&mut radio_clock, RadioPeripherals::Wifi);
         Self::phy_enable(&mut radio_clock);
+        let start_time = Instant::now();
         Self::reset_mac(&mut radio_clock, &wifi);
         Self::init_mac(&wifi);
         Self::ic_enable();
@@ -492,11 +511,14 @@ impl WiFi {
         };
         temp.set_channel(1).unwrap();
         WIFI_TX_SLOT_QUEUE.init(0..5);
-        debug!("WiFi MAC init complete.");
+        debug!(
+            "WiFi MAC init complete. Took {} µs",
+            start_time.elapsed().as_micros()
+        );
         temp
     }
     /// Receive a frame.
-    pub async fn receive<'a: 'b, 'b>(&'a self) -> BorrowedBuffer<'a, 'b> {
+    pub async fn receive<'a>(&'a self) -> BorrowedBuffer<'res, 'a> {
         let dma_list_item;
 
         // Sometimes the DMA list descriptors don't contain any data, even though the hardware indicated reception.
@@ -558,11 +580,11 @@ impl WiFi {
                 .is_80211_n()
                 .bit(rate.is_ht())
                 .rate()
-                .bits(rate.into_bits())
+                .bits(rate.into_bits() & 0x1f)
+                .unknown_enable()
+                .bits(1)
         });
-        tx_slot_parameters
-            .plcp2()
-            .write(|w| unsafe { w.bits(0x00000020) });
+        tx_slot_parameters.plcp2().write(|w| w.unknown().bit(true));
         tx_slot_parameters
             .duration()
             .write(|w| unsafe { w.bits(0x0) });
@@ -570,18 +592,23 @@ impl WiFi {
             tx_slot_parameters.ht_sig().write(|w| unsafe {
                 w.bits(
                     (rate.into_bits() as u32 & 0b111)
-                        | (length as u32 & 0xffff << 8)
+                        | ((length as u32 & 0xffff) << 8)
                         | (0b111 << 24)
                         | ((rate.is_short_gi() as u32) << 31),
                 )
             });
             tx_slot_parameters
                 .ht_unknown()
-                .write(|w| unsafe { w.length().bits(length as u32) });
+                .write(|w| unsafe { w.length().bits(length as u32 | 0x50000) });
         }
+        /*
         tx_slot_config
             .config()
             .modify(|r, w| unsafe { w.bits(r.bits() | 0x02000000) });
+        tx_slot_config
+            .config()
+            .modify(|r, w| unsafe { w.bits(r.bits() | 0x00003000) });
+        */
         Self::enable_tx_slot(tx_slot_config);
         struct CancelOnDrop<'a> {
             tx_slot_config: &'a TX_SLOT_CONFIG,
@@ -598,6 +625,9 @@ impl WiFi {
                 WIFI_TX_SLOTS[self.slot].reset();
                 res
             }
+            fn defuse(self) {
+                mem::forget(self);
+            }
         }
         impl Drop for CancelOnDrop<'_> {
             fn drop(&mut self) {
@@ -605,12 +635,14 @@ impl WiFi {
                 WIFI_TX_SLOTS[self.slot].reset();
             }
         }
-        CancelOnDrop {
+        let cancel_on_drop = CancelOnDrop {
             tx_slot_config,
             slot,
-        }
-        .wait_for_tx_complete()
-        .await
+        };
+        let res = cancel_on_drop.wait_for_tx_complete().await;
+        cancel_on_drop.defuse();
+
+        res
     }
     /// Transmit a frame.
     ///
@@ -653,7 +685,7 @@ impl WiFi {
         }
     }
     pub fn set_filter_status(
-        &mut self,
+        &self,
         bank: RxFilterBank,
         interface: RxFilterInterface,
         enabled: bool,
@@ -664,7 +696,7 @@ impl WiFi {
             .write(|w| w.enabled().bit(enabled));
     }
     pub fn set_filter(
-        &mut self,
+        &self,
         bank: RxFilterBank,
         interface: RxFilterInterface,
         address: [u8; 6],
@@ -701,7 +733,7 @@ macro_rules! generate_stat_accessors {
     ($(
         $stat_name: ident
     ),*) => {
-        impl WiFi {
+        impl WiFi<'_> {
             $(
                 pub fn $stat_name(&self) -> u32 {
                     self.wifi.$stat_name().read().bits()
@@ -711,7 +743,7 @@ macro_rules! generate_stat_accessors {
     };
 }
 generate_stat_accessors![hw_stat_panic];
-impl Drop for WiFi {
+impl Drop for WiFi<'_> {
     fn drop(&mut self) {
         // Ensure, that the radio clocks and the power domain are disabled.
         Self::disable_clock(&mut self.radio_clock, RadioPeripherals::Wifi);

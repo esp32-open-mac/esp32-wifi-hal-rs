@@ -4,7 +4,7 @@ use core::{marker::PhantomData, mem::MaybeUninit};
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Instant, Ticker};
-use esp32_wifi_hal_rs::{DMAResources, WiFi, WiFiRate};
+use esp32_wifi_hal_rs::{DMAResources, TxErrorBehaviour, WiFi, WiFiRate};
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::{efuse::Efuse, timer::timg::TimerGroup};
@@ -50,7 +50,7 @@ const SSID: &str = "The cake is a lie.";
 async fn main(_spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     init_heap();
-    esp_println::logger::init_logger(LevelFilter::Info);
+    esp_println::logger::init_logger(LevelFilter::Debug);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
@@ -107,7 +107,13 @@ async fn main(_spawner: Spawner) {
             },
         };
         let written = buffer.pwrite_with(frame, 0, true).unwrap();
-        let _ = wifi.transmit(&buffer[..written], WiFiRate::PhyRate6M).await;
+        let _ = wifi
+            .transmit(
+                &buffer[..written],
+                WiFiRate::PhyRateMCS0LGI,
+                TxErrorBehaviour::Drop,
+            )
+            .await;
         seq_num += 1;
         beacon_ticker.next().await;
     }

@@ -9,14 +9,15 @@ use alloc::{
 use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Instant, Ticker};
-use esp32_wifi_hal_rs::{DMAResources, RxFilterBank, RxFilterInterface, WiFi, WiFiRate};
+use esp32_wifi_hal_rs::{
+    DMAResources, RxFilterBank, RxFilterInterface, TxErrorBehaviour, WiFi, WiFiRate,
+};
 use esp_backtrace as _;
 use esp_hal::{
     efuse::Efuse,
     gpio::Io,
-    peripherals::UART0,
     timer::timg::TimerGroup,
-    uart::{config::Config, Uart, UartRx, UartTx},
+    uart::{config::Config, Uart, UartRx},
     Async,
 };
 use ieee80211::{
@@ -59,7 +60,7 @@ fn init_heap() {
 
 const QUIT_SIGNAL: u8 = b'q';
 
-async fn wait_for_quit(uart_rx: &mut UartRx<'_, UART0, Async>) {
+async fn wait_for_quit(uart_rx: &mut UartRx<'_, Async, impl esp_hal::uart::Instance>) {
     loop {
         let mut buf = [0x0u8];
         let _ = uart_rx.read_async(buf.as_mut_slice()).await;
@@ -70,7 +71,7 @@ async fn wait_for_quit(uart_rx: &mut UartRx<'_, UART0, Async>) {
 }
 fn channel_cmd<'a>(
     wifi: &mut WiFi,
-    uart0_tx: &mut UartTx<'_, UART0, Async>,
+    uart0_tx: &mut impl Write,
     mut args: impl Iterator<Item = &'a str> + 'a,
 ) {
     match args.next() {
@@ -107,8 +108,8 @@ fn channel_cmd<'a>(
     }
 }
 async fn scan_on_channel(
-    wifi: &mut WiFi,
-    uart0_tx: &mut UartTx<'_, UART0, Async>,
+    wifi: &mut WiFi<'_>,
+    uart0_tx: &mut impl Write,
     known_aps: &mut BTreeSet<String>,
 ) {
     loop {
@@ -132,8 +133,8 @@ async fn scan_on_channel(
     }
 }
 async fn scan_command<'a>(
-    wifi: &mut WiFi,
-    uart0_tx: &mut UartTx<'_, UART0, Async>,
+    wifi: &mut WiFi<'_>,
+    uart0_tx: &mut impl Write,
     mut args: impl Iterator<Item = &'a str> + 'a,
 ) {
     wifi.set_filter_status(RxFilterBank::BSSID, RxFilterInterface::Zero, false);
@@ -170,8 +171,8 @@ async fn scan_command<'a>(
     }
 }
 async fn beacon_command<'a>(
-    wifi: &mut WiFi,
-    uart0_tx: &mut UartTx<'_, UART0, Async>,
+    wifi: &mut WiFi<'_>,
+    uart0_tx: &mut impl Write,
     mut args: impl Iterator<Item = &'a str> + 'a,
 ) {
     let Some(ssid) = args.next() else {
@@ -243,12 +244,18 @@ async fn beacon_command<'a>(
             .sequence_control
             .set_sequence_number(seq_num);
         let written = buf.pwrite(beacon_template, 0).unwrap();
-        let _ = wifi.transmit(&buf[..written], WiFiRate::PhyRate6M).await;
+        let _ = wifi
+            .transmit(
+                &buf[..written],
+                WiFiRate::PhyRate6M,
+                TxErrorBehaviour::default(),
+            )
+            .await;
         seq_num += 1;
         beacon_interval.next().await;
     }
 }
-fn dump_command(wifi: &mut WiFi, uart0_tx: &mut UartTx<'_, UART0, Async>) {
+fn dump_command(wifi: &mut WiFi, uart0_tx: &mut impl Write) {
     let _ = writeln!(uart0_tx, "Current channel: {}", wifi.get_channel());
 }
 fn parse_mac(mac_str: &str) -> Option<MACAddress> {
@@ -263,7 +270,7 @@ fn parse_mac(mac_str: &str) -> Option<MACAddress> {
 }
 fn filter_command<'a>(
     wifi: &mut WiFi,
-    uart0_tx: &mut UartTx<'_, UART0, Async>,
+    uart0_tx: &mut impl Write,
     mut args: impl Iterator<Item = &'a str> + 'a,
 ) {
     let bank = match args.next() {
@@ -320,9 +327,11 @@ fn filter_command<'a>(
         }
     }
 }
-async fn sniff_command(wifi: &mut WiFi, uart0_tx: &mut UartTx<'_, UART0, Async>) {
+async fn sniff_command(wifi: &mut WiFi<'_>, uart0_tx: &mut impl Write) {
     loop {
         let received = wifi.receive().await;
+        let _ = writeln!(uart0_tx, "{:x?}", received.header_buffer());
+
         let buffer = received.mpdu_buffer();
         let Ok(generic_frame) = GenericFrame::new(buffer, false) else {
             continue;
@@ -347,7 +356,7 @@ async fn sniff_command(wifi: &mut WiFi, uart0_tx: &mut UartTx<'_, UART0, Async>)
 }
 fn scanning_mode_command<'a>(
     wifi: &mut WiFi,
-    uart0_tx: &mut UartTx<'_, UART0, Async>,
+    uart0_tx: &mut impl Write,
     mut args: impl Iterator<Item = &'a str> + 'a,
 ) {
     let interface = match args.next() {
@@ -374,8 +383,8 @@ fn scanning_mode_command<'a>(
     }
 }
 async fn run_command<'a>(
-    wifi: &mut WiFi,
-    uart0_tx: &mut UartTx<'_, UART0, Async>,
+    wifi: &mut WiFi<'_>,
+    uart0_tx: &mut impl Write,
     command: &str,
     args: impl Iterator<Item = &'a str> + 'a,
 ) {
