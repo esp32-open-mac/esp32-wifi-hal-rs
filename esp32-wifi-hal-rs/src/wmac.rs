@@ -344,7 +344,7 @@ pub struct WiFi<'res> {
     radio_clock: RADIO_CLK,
     wifi: WIFI,
     dma_list: Mutex<RefCell<DMAList<'res>>>,
-    current_channel: u8,
+    current_channel: AtomicU8,
 }
 impl<'res> WiFi<'res> {
     /// Returns the name of a radio peripheral.
@@ -438,7 +438,7 @@ impl<'res> WiFi<'res> {
     ///
     /// NOTE:
     /// This uses the proprietary blob.
-    pub fn set_channel(&mut self, channel_number: u8) -> WiFiResult<()> {
+    pub fn set_channel(&self, channel_number: u8) -> WiFiResult<()> {
         if !(1..=14).contains(&channel_number) {
             return Err(WiFiError::InvalidChannel);
         }
@@ -452,12 +452,13 @@ impl<'res> WiFi<'res> {
         unsafe {
             enable_wifi_agc();
         }
-        self.current_channel = channel_number;
+        self.current_channel
+            .store(channel_number, Ordering::Relaxed);
         Ok(())
     }
     /// Returns the current channel.
     pub fn get_channel(&self) -> u8 {
-        self.current_channel
+        self.current_channel.load(Ordering::Relaxed)
     }
     /// Set the interrupt handler.
     fn set_isr() {
@@ -503,10 +504,10 @@ impl<'res> WiFi<'res> {
         Self::init_mac(&wifi);
         Self::ic_enable();
         Self::chip_enable(&wifi);
-        let mut temp = Self {
+        let temp = Self {
             wifi,
             radio_clock,
-            current_channel: 1,
+            current_channel: AtomicU8::new(1),
             dma_list: Mutex::new(RefCell::new(DMAList::new(dma_resources))),
         };
         temp.set_channel(1).unwrap();

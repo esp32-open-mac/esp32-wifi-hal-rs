@@ -45,7 +45,7 @@ async fn main(_spawner: Spawner) {
     esp_hal_embassy::init(timg0.timer0);
 
     let dma_resources = mk_static!(DMAResources<1500, 10>, DMAResources::new());
-    let mut wifi = WiFi::new(
+    let wifi = WiFi::new(
         peripherals.WIFI,
         peripherals.RADIO_CLK,
         peripherals.ADC2,

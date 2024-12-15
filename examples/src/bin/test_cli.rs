@@ -70,7 +70,7 @@ async fn wait_for_quit(uart_rx: &mut UartRx<'_, Async, impl esp_hal::uart::Insta
     }
 }
 fn channel_cmd<'a>(
-    wifi: &mut WiFi,
+    wifi: &WiFi,
     uart0_tx: &mut impl Write,
     mut args: impl Iterator<Item = &'a str> + 'a,
 ) {
@@ -108,7 +108,7 @@ fn channel_cmd<'a>(
     }
 }
 async fn scan_on_channel(
-    wifi: &mut WiFi<'_>,
+    wifi: &WiFi<'_>,
     uart0_tx: &mut impl Write,
     known_aps: &mut BTreeSet<String>,
 ) {
@@ -133,7 +133,7 @@ async fn scan_on_channel(
     }
 }
 async fn scan_command<'a>(
-    wifi: &mut WiFi<'_>,
+    wifi: &WiFi<'_>,
     uart0_tx: &mut impl Write,
     mut args: impl Iterator<Item = &'a str> + 'a,
 ) {
@@ -171,7 +171,7 @@ async fn scan_command<'a>(
     }
 }
 async fn beacon_command<'a>(
-    wifi: &mut WiFi<'_>,
+    wifi: &WiFi<'_>,
     uart0_tx: &mut impl Write,
     mut args: impl Iterator<Item = &'a str> + 'a,
 ) {
@@ -255,7 +255,7 @@ async fn beacon_command<'a>(
         beacon_interval.next().await;
     }
 }
-fn dump_command(wifi: &mut WiFi, uart0_tx: &mut impl Write) {
+fn dump_command(wifi: &WiFi, uart0_tx: &mut impl Write) {
     let _ = writeln!(uart0_tx, "Current channel: {}", wifi.get_channel());
 }
 fn parse_mac(mac_str: &str) -> Option<MACAddress> {
@@ -269,7 +269,7 @@ fn parse_mac(mac_str: &str) -> Option<MACAddress> {
     Some(MACAddress::new(mac))
 }
 fn filter_command<'a>(
-    wifi: &mut WiFi,
+    wifi: &WiFi,
     uart0_tx: &mut impl Write,
     mut args: impl Iterator<Item = &'a str> + 'a,
 ) {
@@ -327,7 +327,7 @@ fn filter_command<'a>(
         }
     }
 }
-async fn sniff_command(wifi: &mut WiFi<'_>, uart0_tx: &mut impl Write) {
+async fn sniff_command(wifi: &WiFi<'_>, uart0_tx: &mut impl Write) {
     loop {
         let received = wifi.receive().await;
         let _ = writeln!(uart0_tx, "{:x?}", received.header_buffer());
@@ -355,7 +355,7 @@ async fn sniff_command(wifi: &mut WiFi<'_>, uart0_tx: &mut impl Write) {
     }
 }
 fn scanning_mode_command<'a>(
-    wifi: &mut WiFi,
+    wifi: &WiFi,
     uart0_tx: &mut impl Write,
     mut args: impl Iterator<Item = &'a str> + 'a,
 ) {
@@ -383,7 +383,7 @@ fn scanning_mode_command<'a>(
     }
 }
 async fn run_command<'a>(
-    wifi: &mut WiFi<'_>,
+    wifi: &WiFi<'_>,
     uart0_tx: &mut impl Write,
     command: &str,
     args: impl Iterator<Item = &'a str> + 'a,
@@ -451,7 +451,7 @@ async fn main(_spawner: Spawner) {
     .split();
 
     let dma_resources = mk_static!(DMAResources<1500, 10>, DMAResources::new());
-    let mut wifi = WiFi::new(
+    let wifi = WiFi::new(
         peripherals.WIFI,
         peripherals.RADIO_CLK,
         peripherals.ADC2,
@@ -497,7 +497,7 @@ async fn main(_spawner: Spawner) {
             .split_whitespace();
         select(
             wait_for_quit(&mut uart0_rx),
-            run_command(&mut wifi, &mut uart0_tx, cmd.next().unwrap(), cmd),
+            run_command(&wifi, &mut uart0_tx, cmd.next().unwrap(), cmd),
         )
         .await;
     }
