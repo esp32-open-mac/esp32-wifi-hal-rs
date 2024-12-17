@@ -16,11 +16,11 @@ use embassy_sync::{
 use embassy_time::Instant;
 use esp32::wifi::TX_SLOT_CONFIG;
 use esp_hal::{
-    get_core,
     interrupt::{bind_interrupt, enable, map, CpuInterrupt, Priority},
     macros::ram,
     peripherals::{Interrupt, ADC2, LPWR, RADIO_CLK, WIFI},
     system::{RadioClockController, RadioPeripherals},
+    Cpu,
 };
 use esp_wifi_sys::include::{
     esp_phy_calibration_data_t, esp_phy_calibration_mode_t_PHY_RF_CAL_FULL, register_chipv7_phy,
@@ -284,7 +284,7 @@ pub struct BorrowedBuffer<'res, 'a> {
     dma_list: &'a Mutex<RefCell<DMAList<'res>>>,
     dma_list_item: &'a mut RxDMAListItem,
 }
-impl<'res, 'a> BorrowedBuffer<'res, 'a> {
+impl BorrowedBuffer<'_, '_> {
     /// Returns the complete buffer returned by the hardware.
     ///
     /// This includes the header added by the hardware.
@@ -439,7 +439,7 @@ impl<'res> WiFi<'res> {
         trace!("Setting interrupt handler.");
         unsafe {
             map(
-                get_core(),
+                Cpu::current(),
                 Interrupt::WIFI_MAC,
                 CpuInterrupt::Interrupt0LevelPriority1,
             );

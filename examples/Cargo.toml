@@ -10,19 +10,19 @@ license = "MIT OR Apache-2.0"
 esp32-wifi-hal-rs = { path = "../esp32-wifi-hal-rs/", features = ["log"] }
 
 # ESP-HAL dependencies
-esp-hal = { git = "https://github.com/esp32-open-mac/esp-hal", package = "esp-hal", features = [
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", package = "esp-hal", features = [
     "esp32",
 ] }
-esp-hal-embassy = { git = "https://github.com/esp32-open-mac/esp-hal", package = "esp-hal-embassy", features = [
+esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal", package = "esp-hal-embassy", features = [
     "esp32",
 ] }
-esp-alloc = { git = "https://github.com/esp32-open-mac/esp-hal", package = "esp-alloc" }
-esp-backtrace = { git = "https://github.com/esp32-open-mac/esp-hal", package = "esp-backtrace", features = [
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal", package = "esp-alloc" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", package = "esp-backtrace", features = [
     "esp32",
     "panic-handler",
     "println",
 ] }
-esp-println = { git = "https://github.com/esp32-open-mac/esp-hal", package = "esp-println", features = ["log"] }
+esp-println = { git = "https://github.com/esp-rs/esp-hal", package = "esp-println", features = ["log"] }
 
 # Embassy dependencies
 embassy-time = { version = "0.3.1", features = ["generic-queue-8"] }
