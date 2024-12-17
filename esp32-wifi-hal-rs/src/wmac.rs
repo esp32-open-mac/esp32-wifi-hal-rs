@@ -434,32 +434,6 @@ impl<'res> WiFi<'res> {
             w
         });
     }
-    /// Set the channel on which to operate.
-    ///
-    /// NOTE:
-    /// This uses the proprietary blob.
-    pub fn set_channel(&self, channel_number: u8) -> WiFiResult<()> {
-        if !(1..=14).contains(&channel_number) {
-            return Err(WiFiError::InvalidChannel);
-        }
-        trace!("Changing channel to {channel_number}");
-        Self::deinit_mac(&self.wifi);
-        unsafe {
-            chip_v7_set_chan_nomac(channel_number, 0);
-            disable_wifi_agc();
-        }
-        Self::init_mac(&self.wifi);
-        unsafe {
-            enable_wifi_agc();
-        }
-        self.current_channel
-            .store(channel_number, Ordering::Relaxed);
-        Ok(())
-    }
-    /// Returns the current channel.
-    pub fn get_channel(&self) -> u8 {
-        self.current_channel.load(Ordering::Relaxed)
-    }
     /// Set the interrupt handler.
     fn set_isr() {
         trace!("Setting interrupt handler.");
@@ -684,6 +658,32 @@ impl<'res> WiFi<'res> {
                 res
             }
         }
+    }
+    /// Set the channel on which to operate.
+    ///
+    /// NOTE:
+    /// This uses the proprietary blob.
+    pub fn set_channel(&self, channel_number: u8) -> WiFiResult<()> {
+        if !(1..=14).contains(&channel_number) {
+            return Err(WiFiError::InvalidChannel);
+        }
+        trace!("Changing channel to {channel_number}");
+        Self::deinit_mac(&self.wifi);
+        unsafe {
+            chip_v7_set_chan_nomac(channel_number, 0);
+            disable_wifi_agc();
+        }
+        Self::init_mac(&self.wifi);
+        unsafe {
+            enable_wifi_agc();
+        }
+        self.current_channel
+            .store(channel_number, Ordering::Relaxed);
+        Ok(())
+    }
+    /// Returns the current channel.
+    pub fn get_channel(&self) -> u8 {
+        self.current_channel.load(Ordering::Relaxed)
     }
     pub fn set_filter_status(
         &self,
