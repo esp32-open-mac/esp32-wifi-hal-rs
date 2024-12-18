@@ -394,7 +394,7 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 [[package]]
 name = "esp-alloc"
 version = "0.5.0"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "cfg-if",
  "critical-section",
@@ -406,7 +406,7 @@ dependencies = [
 [[package]]
 name = "esp-backtrace"
 version = "0.14.2"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "esp-build",
  "esp-println",
@@ -416,7 +416,7 @@ dependencies = [
 [[package]]
 name = "esp-build"
 version = "0.1.0"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "quote",
  "syn",
@@ -426,7 +426,7 @@ dependencies = [
 [[package]]
 name = "esp-config"
 version = "0.2.0"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "document-features",
 ]
@@ -434,7 +434,7 @@ dependencies = [
 [[package]]
 name = "esp-hal"
 version = "0.22.0"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "basic-toml",
  "bitfield",
@@ -479,7 +479,7 @@ dependencies = [
 [[package]]
 name = "esp-hal-embassy"
 version = "0.5.0"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "critical-section",
  "document-features",
@@ -497,7 +497,7 @@ dependencies = [
 [[package]]
 name = "esp-hal-procmacros"
 version = "0.15.0"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "darling",
  "document-features",
@@ -512,7 +512,7 @@ dependencies = [
 [[package]]
 name = "esp-metadata"
 version = "0.4.0"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "anyhow",
  "basic-toml",
@@ -523,7 +523,7 @@ dependencies = [
 [[package]]
 name = "esp-println"
 version = "0.12.0"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "critical-section",
  "esp-build",
@@ -534,7 +534,7 @@ dependencies = [
 [[package]]
 name = "esp-riscv-rt"
 version = "0.9.1"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "document-features",
  "riscv",
@@ -572,7 +572,6 @@ dependencies = [
  "esp-hal",
  "esp-wifi-sys",
  "esp32",
- "ieee80211",
  "log",
  "macro-bits",
  "static_cell",
@@ -1356,7 +1355,7 @@ dependencies = [
 [[package]]
 name = "xtensa-lx"
 version = "0.9.0"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "critical-section",
  "document-features",
@@ -1365,7 +1364,7 @@ dependencies = [
 [[package]]
 name = "xtensa-lx-rt"
 version = "0.17.2"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "anyhow",
  "document-features",
@@ -1382,7 +1381,7 @@ dependencies = [
 [[package]]
 name = "xtensa-lx-rt-proc-macros"
 version = "0.2.2"
-source = "git+https://github.com/esp-rs/esp-hal#f990957f214654bc50bf896d66539874d299ce9e"
+source = "git+https://github.com/esp-rs/esp-hal#f7c1bdbfc5dfa9afae926beca86475337f29a228"
 dependencies = [
  "darling",
  "proc-macro2",
