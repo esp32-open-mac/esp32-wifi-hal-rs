@@ -1,10 +1,8 @@
 //! This example demonstrates, that concurrent tranmissions are possible.
-//!
-//! NOTE: There is a bug currently, regarding the slot selection, causing beacons to only appear sporadically.
 
 #![no_main]
 #![no_std]
-use core::{marker::PhantomData, mem::MaybeUninit};
+use core::marker::PhantomData;
 
 use embassy_executor::Spawner;
 use embassy_time::{Instant, Timer};
@@ -33,20 +31,6 @@ macro_rules! mk_static {
         let x = STATIC_CELL.uninit().write(($val));
         x
     }};
-}
-use esp_alloc as _;
-
-fn init_heap() {
-    const HEAP_SIZE: usize = 32 * 1024;
-    static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
-
-    unsafe {
-        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
-            HEAP.as_mut_ptr() as *mut u8,
-            HEAP_SIZE,
-            esp_alloc::MemoryCapability::Internal.into(),
-        ));
-    }
 }
 
 static SSIDS: [&str; 6] = [
@@ -118,7 +102,6 @@ async fn beacon_task(ssid: &'static str, id: u8, wifi: &'static WiFi<'static>) {
 #[main]
 async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    init_heap();
     esp_println::logger::init_logger(LevelFilter::Info);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);

@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-use core::{marker::PhantomData, mem::MaybeUninit};
+use core::marker::PhantomData;
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Instant, Ticker};
@@ -15,8 +15,8 @@ use ieee80211::{
         tim::{StaticBitmap, TIMBitmap, TIMElement},
         DSSSParameterSetElement,
     },
-    mac_parser::BROADCAST,
-    mgmt_frame::{body::BeaconBody, BeaconFrame, ManagementFrameHeader},
+    mac_parser::MACAddress,
+    mgmt_frame::{body::ProbeResponseBody, ManagementFrameHeader, ProbeResponseFrame},
     scroll::Pwrite,
     ssid, supported_rates,
 };
@@ -32,24 +32,9 @@ macro_rules! mk_static {
 }
 const SSID: &str = "HIL";
 // const BSSID: MACAddress = MACAddress::new([0x00, 0x80, 0x41, 0x13, 0x37, 0x69]);
-use esp_alloc as _;
-
-fn init_heap() {
-    const HEAP_SIZE: usize = 32 * 1024;
-    static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
-
-    unsafe {
-        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
-            HEAP.as_mut_ptr() as *mut u8,
-            HEAP_SIZE,
-            esp_alloc::MemoryCapability::Internal.into(),
-        ));
-    }
-}
 #[esp_hal_embassy::main]
 async fn main(_spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    init_heap();
     esp_println::logger::init_logger(LevelFilter::Info);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
@@ -63,21 +48,21 @@ async fn main(_spawner: Spawner) {
         dma_resources,
     );
     println!("HIL test TX active.");
-    let module_mac_address = Efuse::get_mac_address().into();
+    let module_mac_address = Efuse::read_base_mac_address().into();
     let mut seq_num = 0;
     let start_timestamp = Instant::now();
     let mut beacon_ticker = Ticker::every(Duration::from_micros(TU.as_micros() as u64 * 100));
     loop {
         let mut buffer = [0u8; 1500];
-        let frame = BeaconFrame {
+        let frame = ProbeResponseFrame {
             header: ManagementFrameHeader {
-                receiver_address: BROADCAST,
+                receiver_address: MACAddress::new([0x08, 0x3a, 0xf2, 0xa8, 0xc7, 0x73]),
                 transmitter_address: module_mac_address,
                 bssid: module_mac_address,
                 sequence_control: SequenceControl::new().with_sequence_number(seq_num),
                 ..Default::default()
             },
-            body: BeaconBody {
+            body: ProbeResponseBody {
                 beacon_interval: 100,
                 timestamp: start_timestamp.elapsed().as_micros(),
                 capabilities_info: CapabilitiesInformation::new().with_is_ess(true),

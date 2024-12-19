@@ -15,9 +15,8 @@ use esp32_wifi_hal_rs::{
 use esp_backtrace as _;
 use esp_hal::{
     efuse::Efuse,
-    gpio::Io,
     timer::timg::TimerGroup,
-    uart::{config::Config, Uart, UartRx},
+    uart::{Config, Uart, UartRx},
     Async,
 };
 use ieee80211::{
@@ -196,7 +195,7 @@ async fn beacon_command<'a>(
         uart0_tx,
         "Transmitting beacons with SSID: {ssid} on channel {channel_number}."
     );
-    let mac_address = MACAddress::new(Efuse::get_mac_address());
+    let mac_address = MACAddress::new(Efuse::read_base_mac_address());
     let mut beacon_template = BeaconFrame {
         header: ManagementFrameHeader {
             bssid: mac_address,
@@ -439,15 +438,14 @@ async fn main(_spawner: Spawner) {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
 
-    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
-    let (tx_pin, rx_pin) = (io.pins.gpio1, io.pins.gpio3);
-    let (mut uart0_rx, mut uart0_tx) = Uart::new_async_with_config(
+    let (mut uart0_rx, mut uart0_tx) = Uart::new(
         peripherals.UART0,
         Config::default().rx_fifo_full_threshold(64),
-        rx_pin,
-        tx_pin,
+        peripherals.GPIO1,
+        peripherals.GPIO2,
     )
     .unwrap()
+    .into_async()
     .split();
 
     let dma_resources = mk_static!(DMAResources<1500, 10>, DMAResources::new());

@@ -6,7 +6,7 @@ use embassy_executor::Spawner;
 use embassy_time::Instant;
 use esp32_wifi_hal_rs::{DMAResources, RxFilterBank, RxFilterInterface, WiFi};
 use esp_backtrace as _;
-use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{efuse::Efuse, timer::timg::TimerGroup};
 use esp_println::println;
 use ieee80211::{common::TU, match_frames, mgmt_frame::BeaconFrame};
 use log::LevelFilter;
@@ -51,13 +51,25 @@ async fn main(_spawner: Spawner) {
         peripherals.ADC2,
         dma_resources,
     );
-    wifi.set_filter_status(RxFilterBank::BSSID, RxFilterInterface::Zero, true);
+    wifi.set_filter(
+        RxFilterBank::ReceiverAddress,
+        RxFilterInterface::Zero,
+        Efuse::read_base_mac_address(),
+        [0xff, 0xff, 0xff, 0xff, 0xff, 0xf0],
+    );
+    wifi.set_filter(
+        RxFilterBank::BSSID,
+        RxFilterInterface::One,
+        [0x08, 0x3a, 0xf2, 0xa8, 0xc9, 0xd8],
+        [0xff; 6],
+    );
+
     wifi.set_filter_status(RxFilterBank::ReceiverAddress, RxFilterInterface::Zero, true);
-    wifi.set_scanning_mode(RxFilterInterface::Zero, true);
     println!("HIL test RX active.");
     let mut last_beacon_received = Instant::now();
     loop {
         let received = wifi.receive().await;
+        continue;
         let _ = match_frames! {
             received.mpdu_buffer(),
             beacon_frame = BeaconFrame => {
