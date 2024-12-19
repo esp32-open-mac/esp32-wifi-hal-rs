@@ -621,7 +621,9 @@ impl<'res> WiFi<'res> {
     }
     /// Transmit a frame.
     ///
-    /// An FCS must be attached.
+    /// The hardware expects the buffer to have room for an FCS. This means, the buffer passed will
+    /// have to be four bytes longer than the actual payload. It doesn't matter if the FCS is
+    /// actually already in the buffer, since the hardware will generate it.
     ///
     /// You must set a [TxErrorBehaviour], so the driver knows what to do in case of a TX error.
     /// The advantage of using this instead of bit banging a higher layer fix is, that we don't
