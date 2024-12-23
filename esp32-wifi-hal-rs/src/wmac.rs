@@ -503,6 +503,7 @@ impl<'res> WiFi<'res> {
             dma_list: Mutex::new(RefCell::new(DMAList::new(dma_resources))),
         };
         temp.set_channel(1).unwrap();
+        // We disable all but one slot for now, due to an issue with duplicate frames.
         WIFI_TX_SLOT_QUEUE.init(0..1);
         debug!(
             "WiFi MAC init complete. Took {} µs",
@@ -571,7 +572,7 @@ impl<'res> WiFi<'res> {
             w.bits(
                 r.bits()
                     | 0x00600000
-                    | ((tx_parameters.wait_for_ack as u32) << 0x10)
+                    | ((tx_parameters.wait_for_ack as u32) << 0x18)
                     | ((tx_parameters.interface_zero as u32) << 0x1b)
                     | ((tx_parameters.interface_one as u32) << 0x1c),
             )
