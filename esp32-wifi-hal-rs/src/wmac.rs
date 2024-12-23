@@ -674,10 +674,12 @@ impl<'res> WiFi<'res> {
         let slot = WIFI_TX_SLOT_QUEUE.wait_for_slot().await;
         trace!("Acquired slot {}.", *slot);
 
-        let seq_num = self.sequence_number.load(Ordering::Relaxed).wrapping_add(1);
-        self.sequence_number.store(seq_num, Ordering::Relaxed);
-        if let Some(sequence_number) = buffer.get_mut(22..24) {
-            sequence_number.copy_from_slice((seq_num << 4).to_le_bytes().as_slice());
+        if tx_parameters.override_seq_num {
+            let seq_num = self.sequence_number.load(Ordering::Relaxed).wrapping_add(1);
+            self.sequence_number.store(seq_num, Ordering::Relaxed);
+            if let Some(sequence_number) = buffer.get_mut(22..24) {
+                sequence_number.copy_from_slice((seq_num << 4).to_le_bytes().as_slice());
+            }
         }
 
         // We initialize the DMA list item.
