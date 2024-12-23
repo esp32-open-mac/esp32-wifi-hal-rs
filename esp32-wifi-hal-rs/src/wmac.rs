@@ -3,7 +3,7 @@ use core::{
     future::poll_fn,
     ops::{Deref, Range},
     pin::{pin, Pin},
-    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
+    sync::atomic::{AtomicU16, AtomicU8, AtomicUsize, Ordering},
     task::Poll,
 };
 
@@ -354,6 +354,7 @@ pub struct TxParameters {
     pub interface_one: bool,
     pub wait_for_ack: bool,
     pub duration: u16,
+    pub override_seq_num: bool,
 
     pub tx_error_behaviour: TxErrorBehaviour,
 }
@@ -363,6 +364,7 @@ pub struct WiFi<'res> {
     wifi: WIFI,
     dma_list: Mutex<RefCell<DMAList<'res>>>,
     current_channel: AtomicU8,
+    sequence_number: AtomicU16,
 }
 impl<'res> WiFi<'res> {
     /// Returns the name of a radio peripheral.
@@ -501,6 +503,7 @@ impl<'res> WiFi<'res> {
             radio_clock,
             current_channel: AtomicU8::new(1),
             dma_list: Mutex::new(RefCell::new(DMAList::new(dma_resources))),
+            sequence_number: AtomicU16::new(0),
         };
         temp.set_channel(1).unwrap();
         // We disable all but one slot for now, due to an issue with duplicate frames.
@@ -658,7 +661,7 @@ impl<'res> WiFi<'res> {
     /// This limitation is bypassed, by just adding 4 to the length passed to the hardware, since
     /// we're 99% sure, the hardware never reads those bytes.
     /// The reason a mutable reference is required, is because for retransmissions, we need to set
-    /// an extra bit in the FCS flags.
+    /// an extra bit in the FCS flags and may have to override the sequence number.
     ///
     /// You must set a [TxErrorBehaviour], so the driver knows what to do in case of a TX error.
     /// The advantage of using this instead of bit banging a higher layer fix is, that we don't
@@ -670,6 +673,12 @@ impl<'res> WiFi<'res> {
     ) -> WiFiResult<()> {
         let slot = WIFI_TX_SLOT_QUEUE.wait_for_slot().await;
         trace!("Acquired slot {}.", *slot);
+
+        let seq_num = self.sequence_number.load(Ordering::Relaxed).wrapping_add(1);
+        self.sequence_number.store(seq_num, Ordering::Relaxed);
+        if let Some(sequence_number) = buffer.get_mut(22..24) {
+            sequence_number.copy_from_slice((seq_num << 4).to_le_bytes().as_slice());
+        }
 
         // We initialize the DMA list item.
         let mut dma_list_item = DMAListItem::new_for_tx(buffer);
@@ -692,7 +701,9 @@ impl<'res> WiFi<'res> {
                         Ok(()) => break,
                         Err(WiFiError::TxTimeout | WiFiError::TxCollision) => {}
                         _ => {
-                            buffer[1] |= bit!(3);
+                            if let Some(byte) = buffer.get_mut(1) {
+                                *byte |= bit!(3);
+                            }
                             debug!("Retransmitting MPDU.");
                         }
                     }
