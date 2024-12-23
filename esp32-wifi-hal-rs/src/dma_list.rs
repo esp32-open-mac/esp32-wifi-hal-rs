@@ -62,8 +62,8 @@ impl DMAListItem<Tx> {
         temp.buffer = buffer as *const _ as *mut u8 as _;
         temp.next = null_mut();
         temp.dma_list_header = DMAListHeader::new()
-            .with_buffer_size(buffer.len() as u16)
-            .with_buffer_length(buffer.len() as u16)
+            .with_buffer_size(buffer.len() as u16 + 4) // This is for the FCS.
+            .with_buffer_length(buffer.len() as u16 + 4)
             .with_has_data(true)
             .with_dma_owned(true);
         temp

@@ -6,7 +6,7 @@ use core::marker::PhantomData;
 
 use embassy_executor::Spawner;
 use embassy_time::{Instant, Timer};
-use esp32_wifi_hal_rs::{DMAResources, TxErrorBehaviour, WiFi, WiFiRate};
+use esp32_wifi_hal_rs::{DMAResources, TxParameters, WiFi, WiFiRate};
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal_embassy::main;
@@ -89,9 +89,11 @@ async fn beacon_task(ssid: &'static str, id: u8, wifi: &'static WiFi<'static>) {
         let written = buffer.pwrite(frame, 0).unwrap();
         let _ = wifi
             .transmit(
-                &buffer[..written],
-                WiFiRate::PhyRate6M,
-                TxErrorBehaviour::Drop,
+                &mut buffer[..written],
+                &TxParameters {
+                    rate: WiFiRate::PhyRate6M,
+                    ..Default::default()
+                },
             )
             .await;
         Timer::after_millis(100).await;

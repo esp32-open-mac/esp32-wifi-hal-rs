@@ -1,7 +1,6 @@
 use core::{
     cell::RefCell,
     future::poll_fn,
-    mem,
     ops::{Deref, Range},
     pin::{pin, Pin},
     sync::atomic::{AtomicU8, AtomicUsize, Ordering},
@@ -38,9 +37,10 @@ use crate::{
 };
 
 serializable_enum! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
     /// The rate used by the PHY.
     pub enum WiFiRate: u8 {
+        #[default]
         PhyRate1ML => 0x00,
         PhyRate2ML => 0x01,
         PhyRate5ML => 0x02,
@@ -139,6 +139,7 @@ impl Drop for BorrowedSlot {
         // We can ignore the result here, because we know that this slot was taken from the queue,
         // and therefore the queue must have space for it.
         let _ = WIFI_TX_SLOT_QUEUE.slots.try_send(self.slot);
+        trace!("Slot {} is now free again.", self.slot);
     }
 }
 /// This keeps track of all the TX slots available, by using a queue of slot numbers in the
@@ -190,31 +191,35 @@ fn process_tx_complete(slot: usize) {
         unsafe { tx_pwctrl_background(1, 0) };
         FRAMES_SINCE_LAST_TXPWR_CTRL.store(0, Ordering::Relaxed);
     }
-    unsafe { WIFI::steal() }
-        .tx_complete_clear()
+    let wifi = unsafe { WIFI::steal() };
+    wifi.tx_complete_clear()
         .modify(|r, w| unsafe { w.bits(r.bits() | (1 << slot)) });
     if slot < 5 {
         WIFI_TX_SLOTS[slot].signal(TxSlotStatus::Done);
     }
 }
 fn process_tx_timeout(slot: usize) {
-    unsafe { WIFI::steal() }
-        .tx_error_clear()
+    let wifi = unsafe { WIFI::steal() };
+
+    wifi.tx_error_clear()
         .modify(|r, w| unsafe { w.slot_timeout().bits(r.slot_timeout().bits() | (1 << slot)) });
     if slot < 5 {
-        WiFi::set_tx_slot_invalid(unsafe { WIFI::steal() }.tx_slot_config(4 - slot));
+        let tx_slot_config = wifi.tx_slot_config(4 - slot);
+        WiFi::set_tx_slot_invalid(tx_slot_config);
+        WiFi::disable_tx_slot(tx_slot_config);
         WIFI_TX_SLOTS[slot].signal(TxSlotStatus::Timeout);
     }
 }
 fn process_collision(slot: usize) {
-    unsafe { WIFI::steal() }
-        .tx_error_clear()
-        .modify(|r, w| unsafe {
-            w.slot_collision()
-                .bits(r.slot_collision().bits() | (1 << slot))
-        });
+    let wifi = unsafe { WIFI::steal() };
+    wifi.tx_error_clear().modify(|r, w| unsafe {
+        w.slot_collision()
+            .bits(r.slot_collision().bits() | (1 << slot))
+    });
     if slot < 5 {
-        WiFi::set_tx_slot_invalid(unsafe { WIFI::steal() }.tx_slot_config(4 - slot));
+        let tx_slot_config = wifi.tx_slot_config(4 - slot);
+        WiFi::set_tx_slot_invalid(tx_slot_config);
+        WiFi::disable_tx_slot(tx_slot_config);
         WIFI_TX_SLOTS[slot].signal(TxSlotStatus::Collision);
     }
 }
@@ -338,6 +343,19 @@ pub enum WiFiError {
     InvalidChannel,
     TxTimeout,
     TxCollision,
+    AckTimeout,
+    CtsTimeout,
+    RtsTimeout,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TxParameters {
+    pub rate: WiFiRate,
+    pub interface_zero: bool,
+    pub interface_one: bool,
+    pub wait_for_ack: bool,
+    pub duration: u16,
+
+    pub tx_error_behaviour: TxErrorBehaviour,
 }
 pub type WiFiResult<T> = Result<T, WiFiError>;
 pub struct WiFi<'res> {
@@ -485,7 +503,7 @@ impl<'res> WiFi<'res> {
             dma_list: Mutex::new(RefCell::new(DMAList::new(dma_resources))),
         };
         temp.set_channel(1).unwrap();
-        WIFI_TX_SLOT_QUEUE.init(0..5);
+        WIFI_TX_SLOT_QUEUE.init(0..1);
         debug!(
             "WiFi MAC init complete. Took {} µs",
             start_time.elapsed().as_micros()
@@ -521,8 +539,13 @@ impl<'res> WiFi<'res> {
             .plcp0()
             .modify(|r, w| unsafe { w.bits(r.bits() | 0xc0000000) });
     }
+    fn disable_tx_slot(tx_slot_config: &TX_SLOT_CONFIG) {
+        tx_slot_config
+            .plcp0()
+            .modify(|r, w| unsafe { w.bits(r.bits() & !(0xc0000000)) });
+    }
     /// Invalidate the transmission slot.
-    pub(crate) fn set_tx_slot_invalid(tx_slot_config: &TX_SLOT_CONFIG) {
+    fn set_tx_slot_invalid(tx_slot_config: &TX_SLOT_CONFIG) {
         tx_slot_config
             .plcp0()
             .modify(|r, w| unsafe { w.bits(r.bits() | 0xb0000000) });
@@ -531,7 +554,7 @@ impl<'res> WiFi<'res> {
     async fn transmit_internal(
         &self,
         dma_list_item: Pin<&TxDMAListItem>,
-        rate: WiFiRate,
+        tx_parameters: &TxParameters,
         slot: usize,
     ) -> WiFiResult<()> {
         let length = dma_list_item.buffer().len();
@@ -544,9 +567,17 @@ impl<'res> WiFi<'res> {
             w.dma_addr()
                 .bits(dma_list_item.get_ref() as *const _ as u32)
         });
-        tx_slot_config
-            .plcp0()
-            .modify(|r, w| unsafe { w.bits(r.bits() | 0x00600000) });
+        tx_slot_config.plcp0().modify(|r, w| unsafe {
+            w.bits(
+                r.bits()
+                    | 0x00600000
+                    | ((tx_parameters.wait_for_ack as u32) << 0x10)
+                    | ((tx_parameters.interface_zero as u32) << 0x1b)
+                    | ((tx_parameters.interface_one as u32) << 0x1c),
+            )
+        });
+
+        let rate = tx_parameters.rate;
 
         let tx_slot_parameters = self.wifi.tx_slot_parameters(4 - slot);
         tx_slot_parameters.plcp1().write(|w| unsafe {
@@ -560,9 +591,10 @@ impl<'res> WiFi<'res> {
                 .bits(1)
         });
         tx_slot_parameters.plcp2().write(|w| w.unknown().bit(true));
+        let duration = tx_parameters.duration as u32;
         tx_slot_parameters
             .duration()
-            .write(|w| unsafe { w.bits(0x0) });
+            .write(|w| unsafe { w.bits(duration | (duration << 0x10)) });
         if rate.is_ht() {
             tx_slot_parameters.ht_sig().write(|w| unsafe {
                 w.bits(
@@ -600,9 +632,6 @@ impl<'res> WiFi<'res> {
                 WIFI_TX_SLOTS[self.slot].reset();
                 res
             }
-            fn defuse(self) {
-                mem::forget(self);
-            }
         }
         impl Drop for CancelOnDrop<'_> {
             fn drop(&mut self) {
@@ -614,25 +643,29 @@ impl<'res> WiFi<'res> {
             tx_slot_config,
             slot,
         };
-        let res = cancel_on_drop.wait_for_tx_complete().await;
-        cancel_on_drop.defuse();
-
-        res
+        cancel_on_drop.wait_for_tx_complete().await?;
+        match tx_slot_parameters.pmd().read().bits() >> 0xc {
+            1 => Err(WiFiError::RtsTimeout),
+            2 => Err(WiFiError::CtsTimeout),
+            5 => Err(WiFiError::AckTimeout),
+            _ => Ok(()),
+        }
     }
     /// Transmit a frame.
     ///
-    /// The hardware expects the buffer to have room for an FCS. This means, the buffer passed will
-    /// have to be four bytes longer than the actual payload. It doesn't matter if the FCS is
-    /// actually already in the buffer, since the hardware will generate it.
+    /// The buffer doesn't need to have room for an FCS, even though the hardware requires this.
+    /// This limitation is bypassed, by just adding 4 to the length passed to the hardware, since
+    /// we're 99% sure, the hardware never reads those bytes.
+    /// The reason a mutable reference is required, is because for retransmissions, we need to set
+    /// an extra bit in the FCS flags.
     ///
     /// You must set a [TxErrorBehaviour], so the driver knows what to do in case of a TX error.
     /// The advantage of using this instead of bit banging a higher layer fix is, that we don't
     /// have to reacquire a TX slot every time TX fails.
     pub async fn transmit(
         &self,
-        buffer: &[u8],
-        rate: WiFiRate,
-        error_behaviour: TxErrorBehaviour,
+        buffer: &mut [u8],
+        tx_parameters: &TxParameters,
     ) -> WiFiResult<()> {
         let slot = WIFI_TX_SLOT_QUEUE.wait_for_slot().await;
         trace!("Acquired slot {}.", *slot);
@@ -644,19 +677,28 @@ impl<'res> WiFi<'res> {
         let dma_list_item = pin!(dma_list_item);
         let dma_list_ref = dma_list_item.into_ref();
 
-        match error_behaviour {
-            TxErrorBehaviour::Drop => self.transmit_internal(dma_list_ref, rate, *slot).await,
+        match tx_parameters.tx_error_behaviour {
+            TxErrorBehaviour::Drop => {
+                self.transmit_internal(dma_list_ref, tx_parameters, *slot)
+                    .await
+            }
             TxErrorBehaviour::RetryUntil(retries) => {
-                let mut res = self.transmit_internal(dma_list_ref, rate, *slot).await;
-                if res.is_err() {
-                    for _ in 0..retries {
-                        res = self.transmit_internal(dma_list_ref, rate, *slot).await;
-                        if res.is_ok() {
-                            break;
+                let mut res = self
+                    .transmit_internal(dma_list_ref, tx_parameters, *slot)
+                    .await;
+                for _ in 0..retries {
+                    match res {
+                        Ok(()) => break,
+                        Err(WiFiError::TxTimeout | WiFiError::TxCollision) => {}
+                        _ => {
+                            buffer[1] |= bit!(3);
+                            debug!("Retransmitting MPDU.");
                         }
                     }
+                    res = self
+                        .transmit_internal(dma_list_ref, tx_parameters, *slot)
+                        .await;
                 }
-
                 res
             }
         }

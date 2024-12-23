@@ -10,7 +10,7 @@ use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Instant, Ticker};
 use esp32_wifi_hal_rs::{
-    DMAResources, RxFilterBank, RxFilterInterface, TxErrorBehaviour, WiFi, WiFiRate,
+    DMAResources, RxFilterBank, RxFilterInterface, TxParameters, WiFi, WiFiRate,
 };
 use esp_backtrace as _;
 use esp_hal::{
@@ -245,9 +245,11 @@ async fn beacon_command<'a>(
         let written = buf.pwrite(beacon_template, 0).unwrap();
         let _ = wifi
             .transmit(
-                &buf[..written],
-                WiFiRate::PhyRate6M,
-                TxErrorBehaviour::default(),
+                &mut buf[..written],
+                &TxParameters {
+                    rate: WiFiRate::PhyRate6M,
+                    ..Default::default()
+                },
             )
             .await;
         seq_num += 1;

@@ -4,7 +4,7 @@ use core::marker::PhantomData;
 
 use embassy_executor::Spawner;
 use esp32_wifi_hal_rs::{
-    DMAResources, RxFilterBank, RxFilterInterface, TxErrorBehaviour, WiFi, WiFiRate,
+    DMAResources, RxFilterBank, RxFilterInterface, TxErrorBehaviour, TxParameters, WiFi, WiFiRate,
 };
 use esp_backtrace as _;
 use esp_hal::{efuse::Efuse, timer::timg::TimerGroup};
@@ -81,10 +81,16 @@ async fn main(_spawner: Spawner) {
             0,
         )
         .unwrap();
-    let slice = &buf[..written];
+    let slice = &mut buf[..written];
     loop {
         let _ = wifi
-            .transmit(slice, WiFiRate::PhyRate9M, TxErrorBehaviour::Drop)
+            .transmit(
+                slice,
+                &TxParameters {
+                    rate: WiFiRate::PhyRate9M,
+                    ..Default::default()
+                },
+            )
             .await;
     }
 }

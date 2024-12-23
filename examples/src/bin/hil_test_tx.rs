@@ -4,7 +4,7 @@ use core::marker::PhantomData;
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Instant, Ticker};
-use esp32_wifi_hal_rs::{DMAResources, TxErrorBehaviour, WiFi, WiFiRate};
+use esp32_wifi_hal_rs::{DMAResources, TxParameters, WiFi, WiFiRate};
 use esp_backtrace as _;
 use esp_hal::{efuse::Efuse, timer::timg::TimerGroup};
 use esp_println::println;
@@ -94,9 +94,11 @@ async fn main(_spawner: Spawner) {
         let written = buffer.pwrite(frame, 0).unwrap();
         let _ = wifi
             .transmit(
-                &buffer[..written],
-                WiFiRate::PhyRate6M,
-                TxErrorBehaviour::Drop,
+                &mut buffer[..written],
+                &TxParameters {
+                    rate: WiFiRate::PhyRate6M,
+                    ..Default::default()
+                },
             )
             .await;
         seq_num += 1;

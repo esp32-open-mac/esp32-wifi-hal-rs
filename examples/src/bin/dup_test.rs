@@ -1,26 +1,27 @@
-#![no_main]
 #![no_std]
-use core::marker::PhantomData;
+#![no_main]
+
+use core::{
+    marker::PhantomData,
+    sync::atomic::{compiler_fence, Ordering},
+};
 
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Instant, Ticker};
-use esp32_wifi_hal_rs::{DMAResources, TxParameters, WiFi, WiFiRate};
+use esp32_wifi_hal_rs::{DMAResources, TxErrorBehaviour, TxParameters, WiFi, WiFiRate};
 use esp_backtrace as _;
 use esp_hal::{efuse::Efuse, timer::timg::TimerGroup};
-use esp_hal_embassy::main;
 use ieee80211::{
-    common::{CapabilitiesInformation, SequenceControl, TU},
+    common::{CapabilitiesInformation, SequenceControl},
     element_chain,
     elements::{
         tim::{StaticBitmap, TIMBitmap, TIMElement},
         DSSSParameterSetElement,
     },
-    mac_parser::BROADCAST,
+    mac_parser::{MACAddress, BROADCAST},
     mgmt_frame::{body::BeaconBody, BeaconFrame, ManagementFrameHeader},
     scroll::Pwrite,
     ssid, supported_rates,
 };
-use log::LevelFilter;
 
 macro_rules! mk_static {
     ($t:ty,$val:expr) => {{
@@ -31,12 +32,10 @@ macro_rules! mk_static {
     }};
 }
 
-const SSID: &str = "The cake is a lie.";
-
-#[main]
+#[esp_hal_embassy::main]
 async fn main(_spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    esp_println::logger::init_logger(LevelFilter::Debug);
+    esp_println::logger::init_logger_from_env();
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
@@ -49,12 +48,19 @@ async fn main(_spawner: Spawner) {
         peripherals.ADC2,
         dma_resources,
     );
-    let module_mac_address = Efuse::read_base_mac_address().into();
-    let mut beacon_ticker = Ticker::every(Duration::from_micros(TU.as_micros() as u64 * 100));
-    let start_timestamp = Instant::now();
+    let module_mac_address = MACAddress::new(Efuse::read_base_mac_address());
+    /*
+        wifi.set_filter(
+            RxFilterBank::ReceiverAddress,
+            RxFilterInterface::Zero,
+            *module_mac_address,
+            [0xff; 6],
+        );
+        wifi.set_filter_status(RxFilterBank::ReceiverAddress, RxFilterInterface::Zero, true);
+    */
+    let buf = mk_static!([u8; 1500], [0x00u8; 1500]);
     let mut seq_num = 0;
     loop {
-        let mut buffer = [0u8; 1500];
         let frame = BeaconFrame {
             header: ManagementFrameHeader {
                 receiver_address: BROADCAST,
@@ -65,10 +71,10 @@ async fn main(_spawner: Spawner) {
             },
             body: BeaconBody {
                 beacon_interval: 100,
-                timestamp: start_timestamp.elapsed().as_micros(),
+                timestamp: 0,
                 capabilities_info: CapabilitiesInformation::new().with_is_ess(true),
                 elements: element_chain! {
-                    ssid!(SSID),
+                    ssid!("Test"),
                     supported_rates![
                             1 B,
                             2 B,
@@ -92,17 +98,25 @@ async fn main(_spawner: Spawner) {
                 ..Default::default()
             },
         };
-        let written = buffer.pwrite_with(frame, 0, true).unwrap();
-        let _ = wifi
-            .transmit(
-                &mut buffer[..written],
-                &TxParameters {
-                    rate: WiFiRate::PhyRate6M,
-                    ..Default::default()
+        let written = buf.pwrite(frame, 0).unwrap();
+        wifi.transmit(
+            &mut buf[..written],
+            &TxParameters {
+                rate: if seq_num % 2 == 0 {
+                    WiFiRate::PhyRate1ML
+                } else {
+                    WiFiRate::PhyRate2ML
                 },
-            )
-            .await;
+                interface_zero: false,
+                interface_one: false,
+                wait_for_ack: false,
+                duration: 0,
+                tx_error_behaviour: TxErrorBehaviour::Drop,
+            },
+        )
+        .await
+        .unwrap();
         seq_num += 1;
-        beacon_ticker.next().await;
+        compiler_fence(Ordering::SeqCst);
     }
 }

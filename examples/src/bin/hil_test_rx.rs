@@ -69,7 +69,6 @@ async fn main(_spawner: Spawner) {
     let mut last_beacon_received = Instant::now();
     loop {
         let received = wifi.receive().await;
-        continue;
         let _ = match_frames! {
             received.mpdu_buffer(),
             beacon_frame = BeaconFrame => {
