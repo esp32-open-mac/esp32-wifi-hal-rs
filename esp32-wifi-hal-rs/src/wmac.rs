@@ -677,6 +677,7 @@ impl<'res> WiFi<'res> {
         }
         impl CancelOnDrop<'_> {
             async fn wait_for_tx_complete(&self) -> WiFiResult<()> {
+                WIFI_TX_SLOTS[self.slot].reset();
                 // Wait for the hardware to confirm transmission.
                 let res = match WIFI_TX_SLOTS[self.slot].wait().await {
                     TxSlotStatus::Done => Ok(()),
