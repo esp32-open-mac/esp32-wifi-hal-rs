@@ -4,6 +4,7 @@ This repo contains an experimental port of esp32-open-mac to Rust, with embassy.
 This is experimental software. USE AT YOUR OWN RISK! We'll not take any liability for damage to the hardware. We do not condone the use of this for malicious purposes.
 ## Usage
 The actual crate lives in `esp32-wifi-hal-rs/` and examples are in `examples/`.
+The `critical_section` feature allows using the driver across cores. If it is disabled, no critical sections are used in the driver at all.
 
 For further information see the docs.
 ## Building

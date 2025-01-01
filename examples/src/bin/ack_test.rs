@@ -8,6 +8,7 @@ use esp32_wifi_hal_rs::{
 };
 use esp_backtrace as _;
 use esp_hal::{efuse::Efuse, timer::timg::TimerGroup};
+use esp_println::println;
 use ieee80211::{
     common::{IEEE80211AuthenticationAlgorithmNumber, IEEE80211StatusCode},
     element_chain,
@@ -42,55 +43,10 @@ async fn main(_spawner: Spawner) {
         peripherals.ADC2,
         dma_resources,
     );
-    let own_mac_address = MACAddress::new(Efuse::read_base_mac_address());
-    let ap_address = MACAddress::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
-    wifi.set_filter_status(RxFilterBank::ReceiverAddress, RxFilterInterface::Zero, true);
-    wifi.set_filter(
-        RxFilterBank::ReceiverAddress,
-        RxFilterInterface::Zero,
-        own_mac_address.0,
-        [0xff; 6],
-    );
-    wifi.set_filter_status(RxFilterBank::BSSID, RxFilterInterface::Zero, true);
-    wifi.set_filter(
-        RxFilterBank::BSSID,
-        RxFilterInterface::Zero,
-        ap_address.0,
-        [0xff; 6],
-    );
-    let mut buf = [0x00u8; 300];
-    let written = buf
-        .pwrite(
-            AuthenticationFrame {
-                header: ManagementFrameHeader {
-                    receiver_address: ap_address,
-                    transmitter_address: own_mac_address,
-                    bssid: ap_address,
-                    ..Default::default()
-                },
-                body: AuthenticationBody {
-                    status_code: IEEE80211StatusCode::Success,
-                    authentication_algorithm_number:
-                        IEEE80211AuthenticationAlgorithmNumber::OpenSystem,
-                    authentication_transaction_sequence_number: 1,
-
-                    elements: element_chain! {},
-                    _phantom: PhantomData,
-                },
-            },
-            0,
-        )
-        .unwrap();
-    let slice = &mut buf[..written];
-    loop {
-        let _ = wifi
-            .transmit(
-                slice,
-                &TxParameters {
-                    rate: WiFiRate::PhyRate9M,
-                    ..Default::default()
-                },
-            )
-            .await;
+    let iter = (0..(0x2fff / 4)).map(|x| 0x3ff7_3000 + x * 4);
+    for addr in iter {
+        println!("ADDR: {addr:x} VAL: {:#08x}", unsafe {
+            (addr as *const u32).read_volatile()
+        });
     }
 }

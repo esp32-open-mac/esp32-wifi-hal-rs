@@ -40,3 +40,4 @@ overflow-checks = false
 [features]
 defmt = ["dep:defmt"]
 log = ["dep:log"]
+critical_section = []

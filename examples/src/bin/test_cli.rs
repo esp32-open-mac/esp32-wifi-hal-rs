@@ -233,26 +233,21 @@ async fn beacon_command<'a>(
         },
     };
     let start_timestamp = Instant::now();
-    let mut seq_num = 0;
     let mut beacon_interval = Ticker::every(Duration::from_micros(100 * TU.as_micros() as u64));
     loop {
         let mut buf = [0x00; 200];
         beacon_template.body.timestamp = start_timestamp.elapsed().as_micros();
-        beacon_template
-            .header
-            .sequence_control
-            .set_sequence_number(seq_num);
         let written = buf.pwrite(beacon_template, 0).unwrap();
         let _ = wifi
             .transmit(
                 &mut buf[..written],
                 &TxParameters {
                     rate: WiFiRate::PhyRate6M,
+                    override_seq_num: true,
                     ..Default::default()
                 },
             )
             .await;
-        seq_num += 1;
         beacon_interval.next().await;
     }
 }
@@ -443,8 +438,8 @@ async fn main(_spawner: Spawner) {
     let (mut uart0_rx, mut uart0_tx) = Uart::new(
         peripherals.UART0,
         Config::default().rx_fifo_full_threshold(64),
+        peripherals.GPIO3,
         peripherals.GPIO1,
-        peripherals.GPIO2,
     )
     .unwrap()
     .into_async()

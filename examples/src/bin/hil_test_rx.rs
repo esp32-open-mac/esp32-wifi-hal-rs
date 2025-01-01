@@ -72,7 +72,6 @@ async fn main(_spawner: Spawner) {
         let _ = match_frames! {
             received.mpdu_buffer(),
             beacon_frame = BeaconFrame => {
-                // println!("RX'd beacon, with SSID: {}", beacon_frame.ssid().unwrap_or_default());
                 let ssid = beacon_frame.ssid();
                 if ssid == Some(TARGET_SSID) {
                     println!("RX'd beacon from {TARGET_SSID}. Last beacon received: {}TUs. Sequence number: {}", (last_beacon_received.elapsed().as_micros() / TU.as_micros() as u64), beacon_frame.header.sequence_control.sequence_number());

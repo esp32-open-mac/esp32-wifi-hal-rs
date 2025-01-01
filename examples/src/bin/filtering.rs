@@ -65,11 +65,5 @@ async fn main(_spawner: Spawner) {
             generic_frame.address_2(),
             generic_frame.frame_control_field().frame_type()
         );
-        /*let _ = match_frames! {
-            buffer,
-            beacon_frame = BeaconFrame => {
-                info!("SSID: {}", beacon_frame.ssid().unwrap());
-            }
-        };*/
     }
 }

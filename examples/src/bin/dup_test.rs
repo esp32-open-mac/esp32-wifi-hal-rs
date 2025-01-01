@@ -1,10 +1,7 @@
 #![no_std]
 #![no_main]
 
-use core::{
-    marker::PhantomData,
-    sync::atomic::{compiler_fence, Ordering},
-};
+use core::marker::PhantomData;
 
 use embassy_executor::Spawner;
 use esp32_wifi_hal_rs::{DMAResources, TxErrorBehaviour, TxParameters, WiFi, WiFiRate};
@@ -49,15 +46,6 @@ async fn main(_spawner: Spawner) {
         dma_resources,
     );
     let module_mac_address = MACAddress::new(Efuse::read_base_mac_address());
-    /*
-        wifi.set_filter(
-            RxFilterBank::ReceiverAddress,
-            RxFilterInterface::Zero,
-            *module_mac_address,
-            [0xff; 6],
-        );
-        wifi.set_filter_status(RxFilterBank::ReceiverAddress, RxFilterInterface::Zero, true);
-    */
     let buf = mk_static!([u8; 1500], [0x00u8; 1500]);
     let mut seq_num = 0;
     loop {
@@ -66,7 +54,7 @@ async fn main(_spawner: Spawner) {
                 receiver_address: BROADCAST,
                 transmitter_address: module_mac_address,
                 bssid: module_mac_address,
-                sequence_control: SequenceControl::new().with_sequence_number(seq_num),
+                sequence_control: SequenceControl::new(),
                 ..Default::default()
             },
             body: BeaconBody {
@@ -110,6 +98,7 @@ async fn main(_spawner: Spawner) {
                 interface_zero: false,
                 interface_one: false,
                 wait_for_ack: false,
+                override_seq_num: true,
                 duration: 0,
                 tx_error_behaviour: TxErrorBehaviour::Drop,
             },
@@ -117,6 +106,5 @@ async fn main(_spawner: Spawner) {
         .await
         .unwrap();
         seq_num += 1;
-        compiler_fence(Ordering::SeqCst);
     }
 }
